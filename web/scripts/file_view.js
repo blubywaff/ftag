@@ -1,0 +1,3 @@
+function changeContent(next) {
+     
+}
