@@ -26,12 +26,15 @@ func landingPage(res http.ResponseWriter, req *http.Request) {
 }
 
 func uploadPage(res http.ResponseWriter, req *http.Request) {
-	if req.Method == "GET" {
-		err := templates.ExecuteTemplate(res, "upload.html", nil)
+    writePage := func() {
+		err := templates.ExecuteTemplate(res, "upload.gotmpl", nil)
 		if err != nil {
 			res.WriteHeader(500)
-			log.Println("error with upload.html")
+			log.Println("error with upload.gotmpl")
 		}
+    }
+	if req.Method == "GET" {
+        writePage()
 		return
 	}
 	if req.Method != "POST" {
@@ -101,6 +104,18 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
         log.Println("Database failed for file upload");
         return;
     }
+    writePage()
+}
+
+func viewPage(res http.ResponseWriter, req *http.Request) {
+	if req.Method == "GET" {
+		err := templates.ExecuteTemplate(res, "view.gotmpl", nil)
+		if err != nil {
+			res.WriteHeader(500)
+			log.Println("error with view.gotmpl")
+		}
+		return
+	}
 }
 
 func main() {
@@ -108,7 +123,7 @@ func main() {
     ctx = context.Background()
 
 	// Load Templates
-	templates = template.Must(template.ParseGlob("./pages/*.html"))
+	templates = template.Must(template.ParseGlob("./templates/*.gotmpl"))
 
     // Load database connection
     driver, err := neo4j.NewDriverWithContext("neo4j://localhost:7687", neo4j.NoAuth())
@@ -122,14 +137,13 @@ func main() {
     defer session.Close(ctx)
 
 	statfs := http.FileServer(http.Dir("./dist"))
-	webfs := http.FileServer(http.Dir("./pages"))
     filefs := http.FileServer(http.Dir("./files"))
 
 	http.HandleFunc("/", landingPage)
 	http.Handle("/public/", http.StripPrefix("/public/", statfs))
-	http.Handle("/site/", http.StripPrefix("/site/", webfs))
 	http.Handle("/files/", http.StripPrefix("/files/", filefs))
 	http.HandleFunc("/site/upload", uploadPage)
+    http.HandleFunc("/site/view", viewPage)
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
