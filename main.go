@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -47,13 +48,6 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 		log.Println("error with multipart form upload")
 		return
 	}
-	rid, err := uuid.NewRandom()
-	if err != nil {
-		res.WriteHeader(500)
-		log.Println("could not create uuid")
-		return
-	}
-	id := rid.String()
 	f, _, err := req.FormFile("uploadfile")
 	if err != nil {
 		res.WriteHeader(500)
@@ -61,32 +55,9 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer f.Close()
-	file, err := os.OpenFile("files/"+id, os.O_WRONLY|os.O_CREATE, os.ModePerm)
-	if err != nil {
-		res.WriteHeader(500)
-		log.Println("could not create file")
-		return
-	}
-	do_del := false
-	defer func() {
-		if !do_del {
-			return
-		}
-		err := os.Remove(file.Name())
-		if err != nil {
-			log.Println("could not delete on fail")
-		}
-	}()
-	defer file.Close()
-	_, err = io.Copy(file, f)
-	if err != nil {
-		res.WriteHeader(500)
-		log.Println("could not copy file")
-		do_del = true
-		return
-	}
     tagstr := req.FormValue("tags")
     tags := strings.Split(tagstr, ",")
+    id, fdel, err := createResource(f, tags);
     _, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
         _, err := tx.Run(ctx, `
         CREATE (a:File {id: $fid})
@@ -100,11 +71,47 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
         return nil, nil
     })
     if err != nil {
-        log.Fatal(err)
+        log.Println(err)
         log.Println("Database failed for file upload");
+        fdel()
         return;
     }
     writePage()
+}
+
+func createResource(f multipart.File, tags []string) (string, func()(), error) {
+	rid, err := uuid.NewRandom()
+	if err != nil {
+		log.Println("could not create uuid")
+		return "", func(){}, err
+	}
+	id := rid.String()
+	file, err := os.OpenFile("files/"+id, os.O_WRONLY|os.O_CREATE, os.ModePerm)
+	if err != nil {
+		log.Println("could not create file")
+		return "", func(){}, err
+	}
+	do_del := false
+    fdel := func() {
+		err := os.Remove(file.Name())
+		if err != nil {
+			log.Println("could not delete on fail")
+		}
+    }
+	defer func() {
+		if !do_del {
+			return
+		}
+        fdel()
+	}()
+	defer file.Close()
+	_, err = io.Copy(file, f)
+	if err != nil {
+		log.Println("could not copy file")
+		do_del = true
+		return "", func(){}, err
+	}
+    return id, fdel, nil
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
