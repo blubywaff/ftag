@@ -1,7 +1,7 @@
 ## Database Spec
 ### Graph Structure
 `(t:Tag)`
-- `name <string>` must contain only characters `[a-zA-Z0-9_]`
+- `name <string>` must contain only characters `[a-z\-]` and is not case sensitive
 - `createdAt <datetime>`
 `(r:Resource)`
 - `identity <uuid>`
