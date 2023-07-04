@@ -12,7 +12,8 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-// returns id of the resource
+// returns id of the resource if created (err == nil)
+//
 func AddFile(ctx context.Context, f io.Reader, tags []string) (string, error) {
 	hasFailed := false
 	doFail := func() { hasFailed = true }
@@ -28,7 +29,7 @@ func AddFile(ctx context.Context, f io.Reader, tags []string) (string, error) {
 		doFail()
 		return "", errorWithContext{err, "failed to read for mime type"}
 	}
-    // TODO restore this
+	// TODO restore this
 	// mimetype := http.DetectContentType(bts)
 
 	var id string
@@ -69,7 +70,7 @@ func AddFile(ctx context.Context, f io.Reader, tags []string) (string, error) {
 
 	_, err = (ctx.Value("bluby_db_session").(neo4j.SessionWithContext)).ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx, `
-        CREATE (a:File {id: $fid})
+        CREATE (a:Resource {id: $fid})
         FOREACH (tag in $tags |
             MERGE (t:Tag {name: tag})
             CREATE (t)-[:describes]->(a)
@@ -84,5 +85,4 @@ func AddFile(ctx context.Context, f io.Reader, tags []string) (string, error) {
 		return "", errorWithContext{err, "database failed for file uplaod"}
 	}
 	return id, nil
-
 }

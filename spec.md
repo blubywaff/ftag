@@ -1,10 +1,10 @@
 ## Database Spec
 ### Graph Structure
 `(t:Tag)`
-- `name <string>` must contain only characters `[a-z\-]` and is not case sensitive
+- `name <string>` must contain only characters `[a-z\-]` and is not case sensitive. Must be at least 3 characters long
 - `createdAt <datetime>`
 `(r:Resource)`
-- `identity <uuid>`
+- `id <uuid>`
 - `uploadedAt <datetime>`
 - `type <mimetype>`
 `(:Tag)-[d:describes]->(:Resource)`

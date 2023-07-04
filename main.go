@@ -37,6 +37,8 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(405)
 		return
 	}
+    // 16 megabytes
+    // consider using maltipart reader to avoid reading oversized uploads
 	err := req.ParseMultipartForm(1 << 24)
 	if err != nil {
 		res.WriteHeader(500)
@@ -50,12 +52,26 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer f.Close()
-	tagstr := req.FormValue("tags")
-	tags := strings.Split(tagstr, ",")
-	// TODO vet tags
+
+    var tags []string
+    {
+        tagstr := req.FormValue("tags")
+        _tags := strings.Split(tagstr, ",")
+        tags = make([]string, 0, len(_tags))
+        for _, t := range _tags {
+            if c, _ := lib.DoesTagConform(t); c {
+                tags = append(tags, t)
+                continue
+            }
+            // tag with error TODO
+        }
+    }
+
 	lib.AddFile(ctx, f, tags)
 
-	writePage()
+    res.Header().Add("location", req.URL.Path)
+    res.WriteHeader(303)
+
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
