@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"html/template"
 	"log"
 	"net/http"
@@ -9,12 +8,11 @@ import (
 	"time"
 
 	"blubywaff/blubywaff.com/lib"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
 var templates *template.Template
 
-var ctx context.Context
+var dbctx lib.DatabaseContext
 
 func landingPage(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(200)
@@ -22,24 +20,21 @@ func landingPage(res http.ResponseWriter, req *http.Request) {
 }
 
 func uploadPage(res http.ResponseWriter, req *http.Request) {
-	writePage := func() {
+	if req.Method == "GET" {
 		err := templates.ExecuteTemplate(res, "upload.gotmpl", nil)
 		if err != nil {
 			res.WriteHeader(500)
 			log.Println("error with upload.gotmpl")
 		}
-	}
-	if req.Method == "GET" {
-		writePage()
 		return
 	}
 	if req.Method != "POST" {
 		res.WriteHeader(405)
 		return
 	}
-    // 16 megabytes
+    // 64 megabytes
     // consider using maltipart reader to avoid reading oversized uploads
-	err := req.ParseMultipartForm(1 << 24)
+	err := req.ParseMultipartForm(1 << 26)
 	if err != nil {
 		res.WriteHeader(500)
 		log.Println("error with multipart form upload")
@@ -48,7 +43,7 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 	f, _, err := req.FormFile("uploadfile")
 	if err != nil {
 		res.WriteHeader(500)
-		log.Println("could not read upload")
+		log.Println("could not read upload " + err.Error())
 		return
 	}
 	defer f.Close()
@@ -67,11 +62,10 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
         }
     }
 
-	lib.AddFile(ctx, f, tags)
+	lib.AddFile(dbctx, f, tags)
 
-    res.Header().Add("location", req.URL.Path)
+    res.Header().Add("location", req.URL.Path + "?stmsg=" + "success")
     res.WriteHeader(303)
-
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
@@ -86,23 +80,17 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	// Initialize context
-	ctx = context.Background()
-
 	// Load Templates
 	templates = template.Must(template.ParseGlob("./templates/*.gotmpl"))
 
 	// Load database connection
-	driver, err := neo4j.NewDriverWithContext("neo4j://localhost:7687", neo4j.NoAuth())
-	if err != nil {
-		log.Fatal("cannot connect to database")
-		return
-	}
-	defer driver.Close(ctx)
-
-	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	ctx = context.WithValue(ctx, "bluby_db_session", session)
-	defer session.Close(ctx)
+    var dbclose func()()
+    var err error
+    dbctx, dbclose, err = lib.ConnectDatabases()
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer dbclose()
 
 	statfs := http.FileServer(http.Dir("./dist"))
 	filefs := http.FileServer(http.Dir("./files"))

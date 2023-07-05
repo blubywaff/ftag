@@ -12,9 +12,14 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+type DatabaseContext struct {
+	neo4jsession neo4j.SessionWithContext
+	njctx        context.Context
+}
+
 // returns id of the resource if created (err == nil)
 //
-func AddFile(ctx context.Context, f io.Reader, tags []string) (string, error) {
+func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
 	hasFailed := false
 	doFail := func() { hasFailed = true }
 
@@ -68,8 +73,8 @@ func AddFile(ctx context.Context, f io.Reader, tags []string) (string, error) {
 		return "", errorWithContext{err, "failed on full copy"}
 	}
 
-	_, err = (ctx.Value("bluby_db_session").(neo4j.SessionWithContext)).ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		_, err := tx.Run(ctx, `
+	_, err = (ctx.neo4jsession.(neo4j.SessionWithContext)).ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx.njctx, `
         CREATE (a:Resource {id: $fid})
         FOREACH (tag in $tags |
             MERGE (t:Tag {name: tag})
@@ -85,4 +90,23 @@ func AddFile(ctx context.Context, f io.Reader, tags []string) (string, error) {
 		return "", errorWithContext{err, "database failed for file uplaod"}
 	}
 	return id, nil
+}
+
+// if the error return is nil, the caller must call returned callback to close the database connection
+func ConnectDatabases() (DatabaseContext, func(), error) {
+	// Create new ctx
+	ctx := context.Background()
+	// Load database connection
+	driver, err := neo4j.NewDriverWithContext("neo4j://localhost:7687", neo4j.NoAuth())
+	if err != nil {
+		log.Fatal("cannot connect to database")
+		return DatabaseContext{}, func() {}, errorWithContext{err, "cannot connect to database"}
+	}
+
+	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	ctx = context.WithValue(ctx, "bluby_db_session", session)
+	return DatabaseContext{session, ctx}, func() {
+		session.Close(ctx)
+		driver.Close(ctx)
+	}, nil
 }
