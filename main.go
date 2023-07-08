@@ -62,9 +62,10 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
         }
     }
 
-	lib.AddFile(dbctx, f, tags)
+    lib.AddFile(dbctx, f, tags)
+    // TODO add upload session for edit page
 
-    res.Header().Add("location", req.URL.Path + "?stmsg=" + "success")
+    res.Header().Add("location", req.URL.Path)
     res.WriteHeader(303)
 }
 
