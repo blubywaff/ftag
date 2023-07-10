@@ -1,7 +1,7 @@
 package lib
 
 import (
-    "time"
+	"time"
 )
 
 // Verifies and return true if a tag is conformant.
@@ -20,8 +20,8 @@ func DoesTagConform(tag string) (bool, int) {
 }
 
 type Resource struct {
-    id string
-    mimetype string
-    createdAt time.Time
-    tags []string
+	id        string
+	mimetype  string
+	createdAt time.Time
+	tags      []string
 }

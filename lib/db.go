@@ -5,6 +5,8 @@ import (
 	"context"
 	"io"
 	"log"
+	"net/http"
+	"time"
 
 	"errors"
 	"os"
@@ -57,8 +59,7 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
 		doFail()
 		return "", errorWithContext{err, "failed to read for mime type"}
 	}
-	// TODO restore this
-	// mimetype := http.DetectContentType(bts)
+	mimetype := http.DetectContentType(bts)
 
 	id, err := GenUUID()
 	if err != nil {
@@ -94,11 +95,12 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
 
 	_, err = ctx.neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx.njctx, `
-        CREATE (a:Resource {id: $fid})
+        CREATE (a:Resource {id: $fid, createdAt: datetime($date), type: $type})
         FOREACH (tag in $tags |
             MERGE (t:Tag {name: tag})
             CREATE (t)-[:describes]->(a)
-        )`, map[string]any{"fid": id, "tags": tags})
+        )`, map[string]any{"fid": id, "tags": tags, "type": mimetype, "date": time.Now().UTC().Format(time.RFC3339)})
+		// Couldn't get time.Time values to work so format to string and then back
 		if err != nil {
 			return nil, err
 		}
@@ -112,47 +114,47 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
 }
 
 func GetFile(ctx DatabaseContext, id string) (Resource, error) {
-    resource, err := ctx.neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
-        res, err := tx.Run(ctx.njctx, `
+	resource, err := ctx.neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx.njctx, `
         MATCH (r:Resource {id: $fid})<-[:describes]-(t:Tag)
         WITH collect(r) as r, collect(t) as t
         UNWIND r + t as RR
         RETURN distinct RR
         `, map[string]any{"fid": id})
-        if err != nil {
-            log.Println("database transaction error")
-            return nil, err
-        }
-        recs, err := res.Collect(ctx.njctx)
-        if err != nil {
-            log.Println("collect error")
-            return nil, err
-        }
-        var resource Resource
-        resource.tags = make([]string, len(recs)-1)
-        for _, rec := range recs {
-            a, ok := rec.Get("RR")
-            if !ok {
-                log.Println("RR error")
-                return nil, err
-            }
-            b, ok := a.(neo4j.Node)
-            if !ok {
-                log.Println("cast error")
-                return nil, err
-            }
-            l := b.Labels[0]
-            if l == "Resource" {
-                resource = Resource{ id: b.Props["id"].(string) }
-            }
-            if l == "Tag" {
-                resource.tags = append(resource.tags, b.Props["name"].(string))
-            }
-        }
-        log.Printf("%+v", resource)
-        return resource, nil
-    })
-    return resource.(Resource), err
+		if err != nil {
+			log.Println("database transaction error")
+			return nil, err
+		}
+		recs, err := res.Collect(ctx.njctx)
+		if err != nil {
+			log.Println("collect error")
+			return nil, err
+		}
+		var resource Resource
+		resource.tags = make([]string, len(recs)-1)
+		for _, rec := range recs {
+			a, ok := rec.Get("RR")
+			if !ok {
+				log.Println("RR error")
+				return nil, err
+			}
+			b, ok := a.(neo4j.Node)
+			if !ok {
+				log.Println("cast error")
+				return nil, err
+			}
+			l := b.Labels[0]
+			if l == "Resource" {
+				resource = Resource{id: b.Props["id"].(string), createdAt: b.Props["createdAt"].(time.Time), mimetype: b.Props["type"].(string)}
+			}
+			if l == "Tag" {
+				resource.tags = append(resource.tags, b.Props["name"].(string))
+			}
+		}
+		log.Printf("%+v", resource)
+		return resource, nil
+	})
+	return resource.(Resource), err
 }
 
 // if the error return is nil, the caller must call returned callback to close the database connection
