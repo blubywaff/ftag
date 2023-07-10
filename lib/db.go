@@ -5,7 +5,7 @@ import (
 	"context"
 	"io"
 	"log"
-	// "net/http"
+
 	"errors"
 	"os"
 
@@ -109,6 +109,50 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
 		return "", errorWithContext{err, "database failed for file uplaod"}
 	}
 	return id, nil
+}
+
+func GetFile(ctx DatabaseContext, id string) (Resource, error) {
+    resource, err := ctx.neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+        res, err := tx.Run(ctx.njctx, `
+        MATCH (r:Resource {id: $fid})<-[:describes]-(t:Tag)
+        WITH collect(r) as r, collect(t) as t
+        UNWIND r + t as RR
+        RETURN distinct RR
+        `, map[string]any{"fid": id})
+        if err != nil {
+            log.Println("database transaction error")
+            return nil, err
+        }
+        recs, err := res.Collect(ctx.njctx)
+        if err != nil {
+            log.Println("collect error")
+            return nil, err
+        }
+        var resource Resource
+        resource.tags = make([]string, len(recs)-1)
+        for _, rec := range recs {
+            a, ok := rec.Get("RR")
+            if !ok {
+                log.Println("RR error")
+                return nil, err
+            }
+            b, ok := a.(neo4j.Node)
+            if !ok {
+                log.Println("cast error")
+                return nil, err
+            }
+            l := b.Labels[0]
+            if l == "Resource" {
+                resource = Resource{ id: b.Props["id"].(string) }
+            }
+            if l == "Tag" {
+                resource.tags = append(resource.tags, b.Props["name"].(string))
+            }
+        }
+        log.Printf("%+v", resource)
+        return resource, nil
+    })
+    return resource.(Resource), err
 }
 
 // if the error return is nil, the caller must call returned callback to close the database connection
