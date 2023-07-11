@@ -9,9 +9,10 @@
 
 {{define "preview"}}
     {{ if hasPrefix .Mimetype "image" }}
-        <div class="object-fill flex flex-grow">
-            <img src="/files/{{ .Id }}">
-        </div>
+    <div class="flex-grow w-fit h-full min-h-0">
+        <img src="/files/{{ .Id }}" class="object-scale-down w-full h-full">
+    </div>
+    <p>{{ .Id }}</p>
     {{end}}
     {{ if hasPrefix .Mimetype "video" }}
         <p> TODO, not here yet </p>

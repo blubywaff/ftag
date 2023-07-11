@@ -16,9 +16,9 @@ import (
 )
 
 type DatabaseContext struct {
-	neo4jsession neo4j.SessionWithContext
-	njctx        context.Context
-	sessiondb    map[string]any
+	neo4jdriver neo4j.DriverWithContext
+	njctx       context.Context
+	sessiondb   map[string]any
 }
 
 func SetInSessionDB(ctx DatabaseContext, id string, record any) error {
@@ -98,7 +98,9 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
 		return "", errorWithContext{err, "failed on full copy"}
 	}
 
-	_, err = ctx.neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx.njctx)
+	_, err = neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx.njctx, `
         CREATE (a:Resource {id: $fid, createdAt: datetime($date), type: $type})
         FOREACH (tag in $tags |
@@ -119,7 +121,9 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
 }
 
 func GetFile(ctx DatabaseContext, id string) (Resource, error) {
-	resource, err := ctx.neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx.njctx)
+	resource, err := neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx.njctx, `
         MATCH (r:Resource {id: $fid})<-[:describes]-(t:Tag)
         WITH collect(r) as r, collect(t) as t
@@ -168,7 +172,9 @@ func GetFile(ctx DatabaseContext, id string) (Resource, error) {
 }
 
 func ChangeTags(ctx DatabaseContext, addtags []string, deltags []string, id string) error {
-	_, err := ctx.neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx.njctx)
+	_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx.njctx, `
         MATCH (a:Resource {id: $fid})
         CALL {
@@ -209,11 +215,10 @@ func ConnectDatabases() (DatabaseContext, func(), error) {
 	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	ctx = context.WithValue(ctx, "bluby_db_session", session)
 	return DatabaseContext{
-			session,
+			driver,
 			ctx,
 			make(map[string]any),
 		}, func() {
-			session.Close(ctx)
 			driver.Close(ctx)
 		}, nil
 }
