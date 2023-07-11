@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+    {{template "stdhead" .PageMeta }}
+    <body>
+        <div class="flex flex-col h-screen">
+        <p>Editing: {{.Resource.Id}} with tags: </p>
+        <p>{{range .Resource.Tags }}{{ . }}, {{end}}</p>
+        {{ if .Session.FailedAddTags }}
+        <p>
+        Failed to add invalid tags:
+        {{ range .Session.FailedAddTags }}
+        {{ . }},
+        {{end}}
+        </p>
+        {{end}}
+        {{ if .Session.FailedDelTags }}
+        <p>
+        Failed to remove invalid tags:
+        {{ range .Session.FailedDelTags }}
+        {{ . }},
+        {{end}}
+        </p>
+        {{end}}
+        <form method="post" enctype="multipart/form-data">
+            <input type="text" name="addtags" /><br>
+            <input type="text" name="deltags" /><br>
+            <input type="submit" value="save" /><br>
+        </form>
+        {{template "preview" .Resource }}
+        </div>
+    </body>
+</html>

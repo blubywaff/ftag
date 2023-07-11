@@ -1,5 +1,19 @@
 {{define "stdhead"}}
     <head>
         <link rel="stylesheet" href="/public/style.css" />
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{{ .Title }}</title>
     </head>
+{{end}}
+
+{{define "preview"}}
+    {{ if hasPrefix .Mimetype "image" }}
+        <div class="object-fill flex flex-grow">
+            <img src="/files/{{ .Id }}">
+        </div>
+    {{end}}
+    {{ if hasPrefix .Mimetype "video" }}
+        <p> TODO, not here yet </p>
+    {{end}}
 {{end}}

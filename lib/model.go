@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"strings"
 	"time"
 )
 
@@ -19,9 +20,30 @@ func DoesTagConform(tag string) (bool, int) {
 	return true, 0
 }
 
+// Returns good tags and bad tags
+// as a special case, empty tags are ignored
+func SortTagList(tagstr string) ([]string, []string) {
+	var tags []string
+	var badtags []string
+	_tags := strings.Split(tagstr, ",")
+	tags = make([]string, 0)
+	badtags = make([]string, 0)
+	for _, t := range _tags {
+		if len(t) == 0 {
+			continue
+		}
+		if c, _ := DoesTagConform(t); c {
+			tags = append(tags, t)
+			continue
+		}
+		badtags = append(badtags, t)
+	}
+	return tags, badtags
+}
+
 type Resource struct {
-	id        string
-	mimetype  string
-	createdAt time.Time
-	tags      []string
+	Id        string
+	Mimetype  string
+	CreatedAt time.Time
+	Tags      []string
 }

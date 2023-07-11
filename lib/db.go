@@ -34,6 +34,11 @@ func GetFromSessionDB(ctx DatabaseContext, id string) (any, error) {
 	return record, nil
 }
 
+func RemoveFromSessionDB(ctx DatabaseContext, id string) error {
+	delete(ctx.sessiondb, id)
+	return nil
+}
+
 func GenUUID() (string, error) {
 	rid, err := uuid.NewRandom()
 	if err != nil {
@@ -131,7 +136,10 @@ func GetFile(ctx DatabaseContext, id string) (Resource, error) {
 			return nil, err
 		}
 		var resource Resource
-		resource.tags = make([]string, len(recs)-1)
+		if len(recs) == 0 {
+			return nil, errors.New("no resource of id " + id)
+		}
+		resource.Tags = make([]string, len(recs)-1)
 		for _, rec := range recs {
 			a, ok := rec.Get("RR")
 			if !ok {
@@ -145,16 +153,46 @@ func GetFile(ctx DatabaseContext, id string) (Resource, error) {
 			}
 			l := b.Labels[0]
 			if l == "Resource" {
-				resource = Resource{id: b.Props["id"].(string), createdAt: b.Props["createdAt"].(time.Time), mimetype: b.Props["type"].(string)}
+				resource = Resource{Id: b.Props["id"].(string), CreatedAt: b.Props["createdAt"].(time.Time), Mimetype: b.Props["type"].(string)}
 			}
 			if l == "Tag" {
-				resource.tags = append(resource.tags, b.Props["name"].(string))
+				resource.Tags = append(resource.Tags, b.Props["name"].(string))
 			}
 		}
-		log.Printf("%+v", resource)
 		return resource, nil
 	})
+	if err != nil {
+		return Resource{}, err
+	}
 	return resource.(Resource), err
+}
+
+func ChangeTags(ctx DatabaseContext, addtags []string, deltags []string, id string) error {
+	_, err := ctx.neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx.njctx, `
+        MATCH (a:Resource {id: $fid})
+        CALL {
+            WITH a
+            UNWIND $addtags as tag
+            MERGE (t:Tag {name: tag})
+            CREATE (t)-[:describes]->(a)
+        }
+        CALL {
+            WITH a
+            UNWIND $deltags as tag
+            MATCH (t:Tag {name: tag})-[d:describes]->(a)
+            DELETE d
+        }
+        `, map[string]any{"fid": id, "addtags": addtags, "deltags": deltags})
+		if err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // if the error return is nil, the caller must call returned callback to close the database connection
