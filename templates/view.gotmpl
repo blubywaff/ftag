@@ -1,13 +1,30 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
-    {{template "stdhead"}}
+    {{template "stdhead" .PageMeta}}
     <body>
+        {{ if .Resource }}
         <div class="flex flex-col h-screen">
             <div class="bg-slate-500">
-                <button class="text-sky-100">Prev</button>
-                <button class="text-sky-100">Next</button>
+                <a href="{{.PrevLink}}" class="text-sky-100">Prev</a>
+                <a href="{{.NextLink}}" class="text-sky-100">Next</a>
             </div>
-            <iframe src="/" class="object-fill flex flex-grow" />
+            {{template "preview" .Resource}}
+        </div>
+        {{end}}
+        <div>
+            <form method="get">
+                <input hidden name="number" min=1 max=10000 value=1>
+                <input type="text" name="intags">
+                <input type="text" name="extags">
+                <fieldset>
+                    <legend class="float-left">Exclude Mode: </legend>
+                    <input type="radio" name="exmode" value="or" id="form-exmode-or" checked>
+                    <label for="form-exmode-or">OR</label>
+                    <input type="radio" name="exmode" value="and" id="form-exmode-and">
+                    <label for="form-exmode-and">AND</label>
+                </fieldset>
+                <input type="submit" value="search">
+            </form>
         </div>
     </body>
 </html>

@@ -2,20 +2,16 @@ package main
 
 import (
 	"bytes"
-	"flag"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"runtime/pprof"
+	"strconv"
 	"strings"
 	"time"
 
 	"blubywaff/blubywaff.com/lib"
 )
-
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 var templates *template.Template
 
@@ -227,28 +223,110 @@ func editPage(res http.ResponseWriter, req *http.Request) {
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
-	if req.Method == "GET" {
-		err := templates.ExecuteTemplate(res, "view.gotmpl", nil)
-		if err != nil {
-			res.WriteHeader(500)
-			log.Println("error with view.gotmpl")
-		}
-		return
+	if req.Method != "GET" {
+        res.WriteHeader(405)
+        return
 	}
+    // TODO come up with better way to determine form or not
+    if !strings.Contains(req.URL.String(), "?") {
+        err := templates.ExecuteTemplate(
+            res,
+            "view.gotmpl",
+            struct {
+                PageMeta PageMeta;
+                Resource interface{};
+                Index string;
+            } {
+                PageMeta {
+                    Title: "Viewer",
+                },
+                nil,
+                "",
+            },
+        ) 
+        if err != nil {
+            res.WriteHeader(500)
+            log.Println("error with view.gotmpl", err)
+        }
+        return
+    }
+    var intag, extag []string
+    var exmode string
+    var index int
+    intagstr, ok := req.URL.Query()["intags"]
+    if !ok {
+        http.Error(res, "Missing include tags field", 400)
+        return
+    }
+    intag, _ = lib.SortTagList(intagstr[0])
+    extagstr, ok := req.URL.Query()["extags"]
+    if !ok {
+        http.Error(res, "Missing exclude tags field", 400)
+        return
+    }
+    extag, _ = lib.SortTagList(extagstr[0])
+    exmodestr, ok := req.URL.Query()["exmode"]
+    if !ok {
+        http.Error(res, "Missing exmode field", 400)
+        return
+    }
+    exmode = exmodestr[0]
+    if exmode != "or" && exmode != "and" {
+        http.Error(res, "Invalid exlude mode", 400)
+        return
+    }
+    numerstr, ok := req.URL.Query()["number"]
+    if !ok {
+        http.Error(res, "Missing number field", 400)
+        return
+    }
+    index, err := strconv.Atoi(numerstr[0])
+    if err != nil {
+        http.Error(res, "invalid number", 400)
+        return
+    }
+    if index < 1 {
+        http.Error(res, "exceed list beginning", 400)
+        return
+    }
+    rsrc, err := lib.TagQuery(dbctx, intag, extag, exmode, index - 1)
+    if err == lib.NO_RESULT {
+        if index == 1 {
+            http.Error(res, "no result", 400)
+            return
+        }
+        http.Error(res, "exceed list end", 400)
+        return
+    }
+    if err != nil {
+        res.WriteHeader(500)
+        log.Println("err with viewPage db TagQuery", err)
+        return
+    }
+    err = templates.ExecuteTemplate(
+        res,
+        "view.gotmpl",
+        struct {
+            PageMeta PageMeta;
+            Resource lib.Resource;
+            PrevLink string;
+            NextLink string;
+        } {
+            PageMeta {
+                Title: "Viewing " + rsrc.Id,
+            },
+            rsrc,
+            req.URL.Path + "?number="+strconv.Itoa(index-1) + "&intags="+intagstr[0] + "&extags="+extagstr[0] + "&exmode="+exmode,
+            req.URL.Path + "?number="+strconv.Itoa(index+1) + "&intags="+intagstr[0] + "&extags="+extagstr[0] + "&exmode="+exmode,
+        },
+    ) 
+    if err != nil {
+        res.WriteHeader(500)
+        log.Println("error with view.gotmpl", err)
+    }
 }
 
 func main() {
-    // Initialize CPU Profiling
-    flag.Parse()
-    if *cpuprofile != "" {
-        f, err := os.Create(*cpuprofile)
-        if err != nil {
-            log.Fatal(err)
-        }
-        pprof.StartCPUProfile(f)
-        defer pprof.StopCPUProfile()
-    }
-
 	// Load Templates
     templates = template.Must(template.New("").Funcs(map[string]any {"hasPrefix": strings.HasPrefix}).ParseGlob("./templates/*.gotmpl"))
 

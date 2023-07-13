@@ -9,12 +9,17 @@
 
 {{define "preview"}}
     {{ if hasPrefix .Mimetype "image" }}
-    <div class="flex-grow w-fit h-full min-h-0">
-        <img src="/files/{{ .Id }}" class="object-scale-down w-full h-full">
-    </div>
-    <p>{{ .Id }}</p>
+        <div class="flex-grow w-fit h-full min-h-0">
+            <img src="/files/{{ .Id }}" class="object-contain w-full h-full">
+        </div>
+        <p>{{ .Id }}</p>
     {{end}}
     {{ if hasPrefix .Mimetype "video" }}
-        <p> TODO, not here yet </p>
+        <div class="flex-grow w-fit h-full min-h-0">
+            <video controls loop autoplay muted  class="object-contain w-full h-full">
+                <source src="/files/{{ .Id }}">
+            </video>
+        </div>
+        <p>{{ .Id }}</p>
     {{end}}
 {{end}}

@@ -15,6 +15,8 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+var NO_RESULT error = errors.New("database no result")
+
 type DatabaseContext struct {
 	neo4jdriver neo4j.DriverWithContext
 	njctx       context.Context
@@ -199,6 +201,59 @@ func ChangeTags(ctx DatabaseContext, addtags []string, deltags []string, id stri
 		return err
 	}
 	return nil
+}
+
+func TagQuery(ctx DatabaseContext, includes []string, excludes []string, excludeMode string, index int) (Resource, error) {
+	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx.njctx)
+	rsrc, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		var expart string
+		if excludeMode == "or" {
+			expart = `AND none(tag in $extag WHERE exists((:Tag {name: tag})-[:describes]->(a)))`
+		} else if excludeMode == "and" {
+			expart = `AND ((NOT all(tag in $extag WHERE exists((:Tag {name: tag})-[:describes]->(a)))) OR size($extag) = 0)`
+		}
+		res, err := tx.Run(
+			ctx.njctx,
+			`MATCH (a:Resource)
+WHERE all(tag in $intag WHERE exists((:Tag {name: tag})-[:describes]->(a)))
+`+expart+`
+RETURN a as RR SKIP $index LIMIT 1`,
+			map[string]any{"intag": includes, "extag": excludes, "index": index},
+		)
+		if err != nil {
+			return nil, err
+		}
+		recs, err := res.Collect(ctx.njctx)
+		if err != nil {
+			log.Println("collect error")
+			return nil, err
+		}
+		if len(recs) == 0 {
+			return nil, NO_RESULT
+		}
+		rec := recs[0]
+		a, ok := rec.Get("RR")
+		if !ok {
+			log.Println("RR error")
+			return nil, err
+		}
+		b, ok := a.(neo4j.Node)
+		if !ok {
+			log.Println("cast error")
+			return nil, err
+		}
+		l := b.Labels[0]
+		if l == "Resource" {
+			return Resource{Id: b.Props["id"].(string), CreatedAt: b.Props["createdAt"].(time.Time), Mimetype: b.Props["type"].(string)}, nil
+		} else {
+			return Resource{}, errors.New("wrong RR label")
+		}
+	})
+	if err != nil {
+		return Resource{}, err
+	}
+	return rsrc.(Resource), nil
 }
 
 // if the error return is nil, the caller must call returned callback to close the database connection
