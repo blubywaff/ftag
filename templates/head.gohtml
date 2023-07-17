@@ -14,7 +14,7 @@
         </div>
     {{end}}
     {{ if hasPrefix .Mimetype "video" }}
-        <div class="flex-grow w-fit h-full min-h-0">
+        <div class="flex-grow w-full h-full min-h-0">
             <video controls loop autoplay muted class="object-contain w-full h-full">
                 <source src="/files/{{ .Id }}">
             </video>

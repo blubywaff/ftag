@@ -36,7 +36,7 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method == "GET" {
 		err := templates.ExecuteTemplate(
             res,
-            "upload.gotmpl",
+            "upload.gohtml",
             struct {
                 PageMeta PageMeta
             }{
@@ -47,7 +47,7 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
         )
 		if err != nil {
 			res.WriteHeader(500)
-			log.Println("error with upload.gotmpl")
+			log.Println("error with upload.gohtml")
 		}
 		return
 	}
@@ -132,7 +132,7 @@ func editPage(res http.ResponseWriter, req *http.Request) {
         }
 		err = templates.ExecuteTemplate(
             res,
-            "edit.gotmpl",
+            "edit.gohtml",
             struct {
                 PageMeta PageMeta
                 Resource lib.Resource
@@ -147,7 +147,7 @@ func editPage(res http.ResponseWriter, req *http.Request) {
         )
 		if err != nil {
 			res.WriteHeader(500)
-			log.Println("error with edit.gotmpl", err)
+			log.Println("error with edit.gohtml", err)
             return
 		}
 		return
@@ -231,7 +231,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
     if !strings.Contains(req.URL.String(), "?") {
         err := templates.ExecuteTemplate(
             res,
-            "view.gotmpl",
+            "view.gohtml",
             struct {
                 PageMeta PageMeta;
                 Resource interface{};
@@ -246,7 +246,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
         ) 
         if err != nil {
             res.WriteHeader(500)
-            log.Println("error with view.gotmpl", err)
+            log.Println("error with view.gohtml", err)
         }
         return
     }
@@ -305,7 +305,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
     }
     err = templates.ExecuteTemplate(
         res,
-        "view.gotmpl",
+        "view.gohtml",
         struct {
             PageMeta PageMeta;
             Resource lib.Resource;
@@ -322,13 +322,13 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
     ) 
     if err != nil {
         res.WriteHeader(500)
-        log.Println("error with view.gotmpl", err)
+        log.Println("error with view.gohtml", err)
     }
 }
 
 func main() {
 	// Load Templates
-    templates = template.Must(template.New("").Funcs(map[string]any {"hasPrefix": strings.HasPrefix}).ParseGlob("./templates/*.gotmpl"))
+    templates = template.Must(template.New("").Funcs(map[string]any {"hasPrefix": strings.HasPrefix}).ParseGlob("./templates/*.gohtml"))
 
 	// Load database connection
     var dbclose func()()
