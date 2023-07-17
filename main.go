@@ -192,7 +192,7 @@ func editPage(res http.ResponseWriter, req *http.Request) {
         }
     }
 
-    if len(addtags) == 0 && len(deltags) == 0 {
+    if len(addtags) == 0 && len(deltags) == 0 && len(session.FailedAddTags) == 0 && len(session.FailedDelTags) == 0 {
         http.Error(res, "empty form", 400)
         return
     }
