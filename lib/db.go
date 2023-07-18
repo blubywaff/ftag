@@ -51,7 +51,7 @@ func GenUUID() (string, error) {
 }
 
 // returns id of the resource if created (err == nil)
-func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
+func AddFile(ctx DatabaseContext, f io.Reader, tags TagSet) (string, error) {
 	hasFailed := false
 	doFail := func() { hasFailed = true }
 
@@ -108,7 +108,7 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags []string) (string, error) {
         FOREACH (tag in $tags |
             MERGE (t:Tag {name: tag})
             CREATE (t)-[:describes]->(a)
-        )`, map[string]any{"fid": id, "tags": tags, "type": mimetype, "date": time.Now().UTC().Format(time.RFC3339)})
+        )`, map[string]any{"fid": id, "tags": tags.inner, "type": mimetype, "date": time.Now().UTC().Format(time.RFC3339)})
 		// Couldn't get time.Time values to work so format to string and then back
 		if err != nil {
 			return nil, err
@@ -173,7 +173,7 @@ func GetFile(ctx DatabaseContext, id string) (Resource, error) {
 	return resource.(Resource), err
 }
 
-func ChangeTags(ctx DatabaseContext, addtags []string, deltags []string, id string) error {
+func ChangeTags(ctx DatabaseContext, addtags TagSet, deltags TagSet, id string) error {
 	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer neo4jsession.Close(ctx.njctx)
 	_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
@@ -183,7 +183,7 @@ func ChangeTags(ctx DatabaseContext, addtags []string, deltags []string, id stri
             WITH a
             UNWIND $addtags as tag
             MERGE (t:Tag {name: tag})
-            CREATE (t)-[:describes]->(a)
+            MERGE (t)-[:describes]->(a)
         }
         CALL {
             WITH a
@@ -191,7 +191,7 @@ func ChangeTags(ctx DatabaseContext, addtags []string, deltags []string, id stri
             MATCH (t:Tag {name: tag})-[d:describes]->(a)
             DELETE d
         }
-        `, map[string]any{"fid": id, "addtags": addtags, "deltags": deltags})
+        `, map[string]any{"fid": id, "addtags": addtags.inner, "deltags": deltags.inner})
 		if err != nil {
 			return nil, err
 		}
@@ -203,7 +203,7 @@ func ChangeTags(ctx DatabaseContext, addtags []string, deltags []string, id stri
 	return nil
 }
 
-func TagQuery(ctx DatabaseContext, includes []string, excludes []string, excludeMode string, index int) (Resource, error) {
+func TagQuery(ctx DatabaseContext, includes, excludes TagSet, excludeMode string, index int) (Resource, error) {
 	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer neo4jsession.Close(ctx.njctx)
 	rsrc, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
@@ -219,7 +219,7 @@ func TagQuery(ctx DatabaseContext, includes []string, excludes []string, exclude
 WHERE all(tag in $intag WHERE exists((:Tag {name: tag})-[:describes]->(a)))
 `+expart+`
 RETURN a as RR SKIP $index LIMIT 1`,
-			map[string]any{"intag": includes, "extag": excludes, "index": index},
+			map[string]any{"intag": includes.inner, "extag": excludes.inner, "index": index},
 		)
 		if err != nil {
 			return nil, err

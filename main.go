@@ -71,7 +71,8 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 	}
 	defer f.Close()
 
-    tags, badtags := lib.SortTagList(req.FormValue("tags"))
+    var tags lib.TagSet
+    badtags := tags.FillFromString(req.FormValue("tags"))
 
     id, err := lib.AddFile(dbctx, f, tags)
     if err != nil {
@@ -159,7 +160,7 @@ func editPage(res http.ResponseWriter, req *http.Request) {
         res.WriteHeader(500)
         return
     }
-    var addtags, deltags []string
+    var addtags, deltags lib.TagSet
     var session ClarifySession
     for {
         part, err := formReader.NextPart()
@@ -178,21 +179,21 @@ func editPage(res http.ResponseWriter, req *http.Request) {
             if buf.Len() == 0 {
                 continue
             }
-            addtags, session.FailedAddTags = lib.SortTagList(buf.String())
+            session.FailedAddTags = addtags.FillFromString(buf.String())
         case "deltags":
             buf := new(bytes.Buffer)
             buf.ReadFrom(part)
             if buf.Len() == 0 {
                 continue
             }
-            deltags, session.FailedDelTags = lib.SortTagList(buf.String())
+            session.FailedDelTags = deltags.FillFromString(buf.String())
         default:
             http.Error(res, "invalid field in form", 400)
             return
         }
     }
 
-    if len(addtags) == 0 && len(deltags) == 0 && len(session.FailedAddTags) == 0 && len(session.FailedDelTags) == 0 {
+    if addtags.Len() == 0 && deltags.Len() == 0 && len(session.FailedAddTags) == 0 && len(session.FailedDelTags) == 0 {
         http.Error(res, "empty form", 400)
         return
     }
@@ -250,7 +251,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
         }
         return
     }
-    var intag, extag []string
+    var intag, extag lib.TagSet
     var exmode string
     var index int
     intagstr, ok := req.URL.Query()["intags"]
@@ -258,13 +259,13 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
         http.Error(res, "Missing include tags field", 400)
         return
     }
-    intag, _ = lib.SortTagList(intagstr[0])
+    intag.FillFromString(intagstr[0])
     extagstr, ok := req.URL.Query()["extags"]
     if !ok {
         http.Error(res, "Missing exclude tags field", 400)
         return
     }
-    extag, _ = lib.SortTagList(extagstr[0])
+    extag.FillFromString(extagstr[0])
     exmodestr, ok := req.URL.Query()["exmode"]
     if !ok {
         http.Error(res, "Missing exmode field", 400)
