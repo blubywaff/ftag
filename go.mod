@@ -1,4 +1,4 @@
-module blubywaff/blubywaff.com
+module github.com/blubywaff/ftag
 
 go 1.18
 
