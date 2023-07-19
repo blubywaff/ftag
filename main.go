@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+    "flag"
 
 	"blubywaff/blubywaff.com/lib"
 )
@@ -16,6 +17,9 @@ import (
 var templates *template.Template
 
 var dbctx lib.DatabaseContext
+
+var baseUrlFlag = flag.String("urlbase", "", "Specifies the base url for the server. Should include only path, without origin.")
+var baseUrl string
 
 type PageMeta struct {
     Title string
@@ -88,7 +92,7 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
         }
         lib.SetInSessionDB(dbctx, sessionId, ClarifySession { ResourceId: id, FailedAddTags: badtags } )
 
-        res.Header().Add("location", "/site/edit?session="+sessionId)
+        res.Header().Add("location", baseUrl+"/site/edit?session="+sessionId)
         res.WriteHeader(303)
         return
     }
@@ -213,7 +217,7 @@ func editPage(res http.ResponseWriter, req *http.Request) {
         lib.RemoveFromSessionDB(dbctx, sessionId)
         lib.SetInSessionDB(dbctx, newSessionId, ClarifySession { ResourceId: id, FailedAddTags: session.FailedAddTags, FailedDelTags: session.FailedDelTags } )
 
-        res.Header().Add("location", "/site/edit?session="+newSessionId)
+        res.Header().Add("location", baseUrl+"/site/edit?session="+newSessionId)
         res.WriteHeader(303)
         return
     }
@@ -228,7 +232,6 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
         res.WriteHeader(405)
         return
 	}
-    // TODO come up with better way to determine form or not
     if !strings.Contains(req.URL.String(), "?") {
         err := templates.ExecuteTemplate(
             res,
@@ -317,8 +320,8 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
                 Title: "Viewing " + rsrc.Id,
             },
             rsrc,
-            req.URL.Path + "?number="+strconv.Itoa(index-1) + "&intags="+intagstr[0] + "&extags="+extagstr[0] + "&exmode="+exmode,
-            req.URL.Path + "?number="+strconv.Itoa(index+1) + "&intags="+intagstr[0] + "&extags="+extagstr[0] + "&exmode="+exmode,
+            baseUrl + req.URL.Path + "?number="+strconv.Itoa(index-1) + "&intags="+intagstr[0] + "&extags="+extagstr[0] + "&exmode="+exmode,
+            baseUrl + req.URL.Path + "?number="+strconv.Itoa(index+1) + "&intags="+intagstr[0] + "&extags="+extagstr[0] + "&exmode="+exmode,
         },
     ) 
     if err != nil {
@@ -327,9 +330,21 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
     }
 }
 
+func debugMiddleWare(prefix string, next http.Handler) http.Handler {
+    return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+        log.Println(prefix + " req url: " + req.URL.String())
+        next.ServeHTTP(res, req)
+    })
+}
+
 func main() {
+    // Parse flags
+    flag.Parse()
+
+    baseUrl = *baseUrlFlag
+
 	// Load Templates
-    templates = template.Must(template.New("").Funcs(map[string]any {"hasPrefix": strings.HasPrefix}).ParseGlob("./templates/*.gohtml"))
+    templates = template.Must(template.New("").Funcs(map[string]any {"hasPrefix": strings.HasPrefix, "getBaseUrl": func() (string) { return baseUrl }}).ParseGlob("./templates/*.gohtml"))
 
 	// Load database connection
     var dbclose func()()
@@ -340,15 +355,18 @@ func main() {
     }
     defer dbclose()
 
+    server := http.NewServeMux()
+
 	statfs := http.FileServer(http.Dir("./dist"))
 	filefs := http.FileServer(http.Dir("./files"))
 
-	http.HandleFunc("/", landingPage)
-	http.Handle("/public/", http.StripPrefix("/public/", statfs))
-	http.Handle("/files/", http.StripPrefix("/files/", filefs))
-	http.HandleFunc("/site/upload", uploadPage)
-	http.HandleFunc("/site/edit", editPage)
-	http.HandleFunc("/site/view", viewPage)
+	server.HandleFunc("/", landingPage)
+	server.Handle("/public/", http.StripPrefix("/public/", statfs))
+	server.Handle("/files/", http.StripPrefix("/files/", filefs))
+	server.HandleFunc("/site/upload", uploadPage)
+	server.HandleFunc("/site/edit", editPage)
+	server.HandleFunc("/site/view", viewPage)
 
-	log.Fatal(http.ListenAndServe(":8080", nil))
+
+	log.Fatal(http.ListenAndServe(":8080", http.StripPrefix(baseUrl, server)))
 }

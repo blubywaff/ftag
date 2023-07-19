@@ -1,6 +1,6 @@
 {{define "stdhead"}}
     <head>
-        <link rel="stylesheet" href="/public/style.css" />
+        <link rel="stylesheet" href="{{getBaseUrl}}/public/style.css" />
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>{{ .Title }}</title>
@@ -10,13 +10,13 @@
 {{define "preview"}}
     {{ if hasPrefix .Mimetype "image" }}
         <div class="flex-grow w-full h-full min-h-0">
-            <img src="/files/{{ .Id }}" class="object-contain w-full h-full">
+            <img src="{{getBaseUrl}}/files/{{ .Id }}" class="object-contain w-full h-full">
         </div>
     {{end}}
     {{ if hasPrefix .Mimetype "video" }}
         <div class="flex-grow w-full h-full min-h-0">
             <video controls loop autoplay muted class="object-contain w-full h-full">
-                <source src="/files/{{ .Id }}">
+                <source src="{{getBaseUrl}}/files/{{ .Id }}">
             </video>
         </div>
     {{end}}
