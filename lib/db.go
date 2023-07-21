@@ -52,6 +52,37 @@ func GenUUID() (string, error) {
 
 // returns id of the resource if created (err == nil)
 func AddFile(ctx DatabaseContext, f io.Reader, tags TagSet) (string, error) {
+	id, mimetype, fir := writeFileReversible(f)
+	if err := fir.OpError(); err != nil {
+		err = errorWithContext{err, "Failed to add file due to file write error"}
+		log.Println(err)
+		return "", err
+	}
+
+	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx.njctx)
+	_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx.njctx, `
+        CREATE (a:Resource {id: $fid, createdAt: datetime($date), type: $type})
+        FOREACH (tag in $tags |
+            MERGE (t:Tag {name: tag})
+            CREATE (t)-[:describes]->(a)
+        )`, map[string]any{"fid": id, "tags": tags.inner, "type": mimetype, "date": time.Now().UTC().Format(time.RFC3339)})
+		// Couldn't get time.Time values to work so format to string and then back
+		if err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+	if err != nil {
+		fir.Clean()
+		return "", errorWithContext{err, "database failed for file uplaod"}
+	}
+	return id, nil
+}
+
+// Returns id, mimetype, canceller
+func writeFileReversible(f io.Reader) (string, string, IntermediateResult) {
 	hasFailed := false
 	doFail := func() { hasFailed = true }
 
@@ -60,23 +91,23 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags TagSet) (string, error) {
 	n, err := f.Read(bts)
 	if n == 0 {
 		doFail()
-		return "", errorWithContext{err, "empty read for mime type"}
+		return "", "", IntermediateResultFromError(errorWithContext{err, "empty read for mime type"})
 	}
 	if err != nil && err != io.EOF {
 		doFail()
-		return "", errorWithContext{err, "failed to read for mime type"}
+		return "", "", IntermediateResultFromError(errorWithContext{err, "failed to read for mime type"})
 	}
 	mimetype := http.DetectContentType(bts)
 
 	id, err := GenUUID()
 	if err != nil {
-		return "", errorWithContext{err, "could not create uuid"}
+		return "", "", IntermediateResultFromError(errorWithContext{err, "could not create uuid"})
 	}
 
 	file, err := os.OpenFile("files/"+id, os.O_WRONLY|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		doFail()
-		return "", errorWithContext{err, "could not create file"}
+		return "", "", IntermediateResultFromError(errorWithContext{err, "could not create file"})
 	}
 	defer func(_id string) {
 		if err := file.Close(); err != nil {
@@ -93,33 +124,23 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags TagSet) (string, error) {
 
 	_, err = io.Copy(file, bytes.NewReader(bts))
 	if err != nil {
-		return "", errorWithContext{err, "failed on peek copy"}
+		return "", "", IntermediateResultFromError(errorWithContext{err, "failed on peek copy"})
 	}
 	_, err = io.Copy(file, f)
 	if err != nil {
-		return "", errorWithContext{err, "failed on full copy"}
+		return "", "", IntermediateResultFromError(errorWithContext{err, "failed on full copy"})
 	}
 
-	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer neo4jsession.Close(ctx.njctx)
-	_, err = neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		_, err := tx.Run(ctx.njctx, `
-        CREATE (a:Resource {id: $fid, createdAt: datetime($date), type: $type})
-        FOREACH (tag in $tags |
-            MERGE (t:Tag {name: tag})
-            CREATE (t)-[:describes]->(a)
-        )`, map[string]any{"fid": id, "tags": tags.inner, "type": mimetype, "date": time.Now().UTC().Format(time.RFC3339)})
-		// Couldn't get time.Time values to work so format to string and then back
-		if err != nil {
-			return nil, err
-		}
-		return nil, nil
-	})
-	if err != nil {
-		doFail()
-		return "", errorWithContext{err, "database failed for file uplaod"}
+	return id, mimetype, IntermediateResult{
+		cleanup: func() error {
+			if err := os.Remove(file.Name()); err != nil {
+				log.Println("could not delete on fail: " + id)
+				return err
+			}
+			return nil
+		},
+		err: nil,
 	}
-	return id, nil
 }
 
 func GetFile(ctx DatabaseContext, id string) (Resource, error) {

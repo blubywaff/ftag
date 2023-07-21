@@ -19,6 +19,10 @@ type IntermediateResult struct {
 	err     error
 }
 
+func IntermediateResultFromError(err error) IntermediateResult {
+	return IntermediateResult{func() error { return nil }, err}
+}
+
 // return nil if cleanup was successful
 // this includes cases where there was nothing to clenaup because the original operation failed
 func (ir *IntermediateResult) Clean() error {
