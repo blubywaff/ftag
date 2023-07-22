@@ -96,7 +96,7 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
         res.WriteHeader(303)
         return
     }
-    res.Header().Add("location", baseUrl+req.URL.Path)
+    res.Header().Add("location", baseUrl+"/site/edit?id="+id)
     res.WriteHeader(303)
 }
 
@@ -222,7 +222,7 @@ func editPage(res http.ResponseWriter, req *http.Request) {
         return
     }
 
-    res.Header().Add("location", baseUrl+"/site/upload")
+    res.Header().Add("location", baseUrl+"/site/view")
     res.WriteHeader(303)
     return
 }

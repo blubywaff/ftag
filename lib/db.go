@@ -239,7 +239,7 @@ func TagQuery(ctx DatabaseContext, includes, excludes TagSet, excludeMode string
 			`MATCH (a:Resource)
 WHERE all(tag in $intag WHERE exists((:Tag {name: tag})-[:describes]->(a)))
 `+expart+`
-RETURN a as RR SKIP $index LIMIT 1`,
+RETURN a as RR ORDER BY a.createdAt DESC SKIP $index LIMIT 1`,
 			map[string]any{"intag": includes.inner, "extag": excludes.inner, "index": index},
 		)
 		if err != nil {
