@@ -91,6 +91,10 @@ func (ts *TagSet) Add(str string) error {
 
 // adds a pre-checked tag string
 func (ts *TagSet) add(str string) error {
+	if len(ts.inner) == 0 {
+		ts.inner = append(ts.inner, str)
+		return nil
+	}
 	l, r := 0, len(ts.inner)
 	for l != r {
 		m := (l + r) / 2
@@ -103,6 +107,11 @@ func (ts *TagSet) add(str string) error {
 			r = m
 		}
 	}
-	ts.inner = append(append(ts.inner[:l], str), ts.inner[l:]...)
+	if l == len(ts.inner) {
+		ts.inner = append(ts.inner, str)
+		return nil
+	}
+	ts.inner = append(ts.inner[:l+1], ts.inner[l:]...)
+	ts.inner[l] = str
 	return nil
 }
