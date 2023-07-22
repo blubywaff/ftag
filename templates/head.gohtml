@@ -9,13 +9,13 @@
 
 {{define "preview"}}
     {{ if hasPrefix .Mimetype "image" }}
-        <div class="flex-grow w-full h-full min-h-0">
-            <img src="{{getBaseUrl}}/files/{{ .Id }}" class="object-contain w-full h-full">
+        <div class="flex-grow w-full h-full min-h-0 flex flex-col place-center">
+            <img src="{{getBaseUrl}}/files/{{ .Id }}" class="object-scale-down m-auto min-h-0">
         </div>
     {{end}}
     {{ if hasPrefix .Mimetype "video" }}
-        <div class="flex-grow w-full h-full min-h-0">
-            <video controls loop autoplay muted class="object-contain w-full h-full">
+        <div class="flex-grow w-full h-full min-h-0 flex flex-col place-center">
+            <video controls loop autoplay muted class="object-scale-down m-auto min-h-0">
                 <source src="{{getBaseUrl}}/files/{{ .Id }}">
             </video>
         </div>
