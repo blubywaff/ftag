@@ -63,11 +63,13 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags TagSet) (string, error) {
 	defer neo4jsession.Close(ctx.njctx)
 	_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx.njctx, `
-        CREATE (a:Resource {id: $fid, createdAt: datetime($date), type: $type})
-        FOREACH (tag in $tags |
-            MERGE (t:Tag {name: tag})
-            CREATE (t)-[:describes]->(a)
-        )`, map[string]any{"fid": id, "tags": tags.inner, "type": mimetype, "date": time.Now().UTC().Format(time.RFC3339)})
+CREATE (a:Resource {id: $fid, createdAt: datetime($date), type: $type})
+FOREACH (tag in $tags |
+    MERGE (t:Tag {name: tag})
+    CREATE (t)-[:describes]->(a)
+)`,
+			map[string]any{"fid": id, "tags": tags.inner, "type": mimetype, "date": time.Now().UTC().Format(time.RFC3339)},
+		)
 		// Couldn't get time.Time values to work so format to string and then back
 		if err != nil {
 			return nil, err
@@ -148,11 +150,12 @@ func GetFile(ctx DatabaseContext, id string) (Resource, error) {
 	defer neo4jsession.Close(ctx.njctx)
 	resource, err := neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx.njctx, `
-        MATCH (r:Resource {id: $fid})<-[:describes]-(t:Tag)
-        WITH collect(r) as r, collect(t) as t
-        UNWIND r + t as RR
-        RETURN distinct RR
-        `, map[string]any{"fid": id})
+MATCH (r:Resource {id: $fid})<-[:describes]-(t:Tag)
+WITH collect(r) as r, collect(t) as t
+UNWIND r + t as RR
+RETURN distinct RR`,
+			map[string]any{"fid": id},
+		)
 		if err != nil {
 			log.Println("database transaction error")
 			return nil, err
@@ -199,20 +202,21 @@ func ChangeTags(ctx DatabaseContext, addtags TagSet, deltags TagSet, id string) 
 	defer neo4jsession.Close(ctx.njctx)
 	_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx.njctx, `
-        MATCH (a:Resource {id: $fid})
-        CALL {
-            WITH a
-            UNWIND $addtags as tag
-            MERGE (t:Tag {name: tag})
-            MERGE (t)-[:describes]->(a)
-        }
-        CALL {
-            WITH a
-            UNWIND $deltags as tag
-            MATCH (t:Tag {name: tag})-[d:describes]->(a)
-            DELETE d
-        }
-        `, map[string]any{"fid": id, "addtags": addtags.inner, "deltags": deltags.inner})
+MATCH (a:Resource {id: $fid})
+CALL {
+    WITH a
+    UNWIND $addtags as tag
+    MERGE (t:Tag {name: tag})
+    MERGE (t)-[:describes]->(a)
+}
+CALL {
+    WITH a
+    UNWIND $deltags as tag
+    MATCH (t:Tag {name: tag})-[d:describes]->(a)
+    DELETE d
+}`,
+			map[string]any{"fid": id, "addtags": addtags.inner, "deltags": deltags.inner},
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -229,17 +233,26 @@ func TagQuery(ctx DatabaseContext, includes, excludes TagSet, excludeMode string
 	defer neo4jsession.Close(ctx.njctx)
 	rsrc, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		var expart string
-		if excludeMode == "or" {
-			expart = `AND none(tag in $extag WHERE exists((:Tag {name: tag})-[:describes]->(a)))`
-		} else if excludeMode == "and" {
-			expart = `AND ((NOT all(tag in $extag WHERE exists((:Tag {name: tag})-[:describes]->(a)))) OR size($extag) = 0)`
+		if excludes.Len() != 0 {
+			if excludeMode == "or" {
+				expart = `AND none(tag in $extag WHERE exists((:Tag {name: tag})-[:describes]->(a)))`
+			} else if excludeMode == "and" {
+				expart = `AND (NOT all(tag in $extag WHERE exists((:Tag {name: tag})-[:describes]->(a))))`
+			}
 		}
 		res, err := tx.Run(
-			ctx.njctx,
-			`MATCH (a:Resource)
+			ctx.njctx, `
+MATCH (a:Resource)
 WHERE all(tag in $intag WHERE exists((:Tag {name: tag})-[:describes]->(a)))
 `+expart+`
-RETURN a as RR ORDER BY a.createdAt DESC, a.id ASC SKIP $index LIMIT 1`,
+WITH a ORDER BY a.createdAt DESC, a.id ASC SKIP $index LIMIT 1
+CALL {
+    WITH a
+    MATCH (t:Tag)-[:describes]->(a)
+    RETURN collect(a)[0] + collect(t.name) as S0
+}
+UNWIND S0 as RR
+RETURN RR`,
 			map[string]any{"intag": includes.inner, "extag": excludes.inner, "index": index},
 		)
 		if err != nil {
@@ -253,23 +266,25 @@ RETURN a as RR ORDER BY a.createdAt DESC, a.id ASC SKIP $index LIMIT 1`,
 		if len(recs) == 0 {
 			return nil, NO_RESULT
 		}
-		rec := recs[0]
-		a, ok := rec.Get("RR")
-		if !ok {
-			log.Println("RR error")
-			return nil, err
+		var rr Resource
+		for _, rec := range recs {
+			a, ok := rec.Get("RR")
+			if !ok {
+				log.Println("RR error")
+				return nil, err
+			}
+			switch b := a.(type) {
+			case neo4j.Node:
+				rr = Resource{Id: b.Props["id"].(string), CreatedAt: b.Props["createdAt"].(time.Time), Mimetype: b.Props["type"].(string)}
+			case string:
+				rr.Tags = append(rr.Tags, b)
+			default:
+				log.Println("cast error")
+				log.Printf("%#v", a)
+				return nil, errors.New("invalid return type from TagQuery")
+			}
 		}
-		b, ok := a.(neo4j.Node)
-		if !ok {
-			log.Println("cast error")
-			return nil, err
-		}
-		l := b.Labels[0]
-		if l == "Resource" {
-			return Resource{Id: b.Props["id"].(string), CreatedAt: b.Props["createdAt"].(time.Time), Mimetype: b.Props["type"].(string)}, nil
-		} else {
-			return Resource{}, errors.New("wrong RR label")
-		}
+		return rr, nil
 	})
 	if err != nil {
 		return Resource{}, err
