@@ -100,6 +100,64 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
     res.WriteHeader(303)
 }
 
+func multiuploadPage(res http.ResponseWriter, req *http.Request) {
+	if req.Method == "GET" {
+		err := templates.ExecuteTemplate(
+            res,
+            "multiupload.gohtml",
+            struct {
+                PageMeta PageMeta
+            }{
+                PageMeta {
+                    "Upload",
+                },
+            },
+        )
+		if err != nil {
+			res.WriteHeader(500)
+			log.Println("error with multiupload.gohtml")
+		}
+		return
+	}
+	if req.Method != "POST" {
+		res.WriteHeader(405)
+		return
+	}
+    // 1024 megabytes
+    // consider using maltipart reader to avoid reading oversized uploads
+	err := req.ParseMultipartForm(1 << 30)
+	if err != nil {
+		res.WriteHeader(500)
+		log.Println("error with multipart form upload")
+		return
+	}
+
+    var tags lib.TagSet
+    badtags := tags.FillFromString(req.FormValue("tags"))
+    if len(badtags) != 0 {
+        http.Error(res, "Some tags were invalid, multiupload aborted.", 400)
+        return
+    }
+
+    fhs := req.MultipartForm.File["uploadfile"]
+    for _, fh := range fhs {
+        f, err := fh.Open()
+        if err != nil {
+            log.Println("failed to open file from fileheader", err)
+            continue // safety measure TODO figure this out
+        }
+        defer f.Close()
+        _, err = lib.AddFile(dbctx, f, tags)
+        if err != nil {
+            log.Println("failed to write file to database", err)
+            continue // TODO there should be some failure mode here
+        }
+    }
+
+    res.Header().Add("location", baseUrl+"/site/view")
+    res.WriteHeader(303)
+}
+
 func editPage(res http.ResponseWriter, req *http.Request) {
     if (req.Method != "GET" && req.Method != "POST") {
         res.WriteHeader(405)
@@ -364,6 +422,7 @@ func main() {
 	server.Handle("/public/", http.StripPrefix("/public/", statfs))
 	server.Handle("/files/", http.StripPrefix("/files/", filefs))
 	server.HandleFunc("/site/upload", uploadPage)
+	server.HandleFunc("/site/upload/many", multiuploadPage)
 	server.HandleFunc("/site/edit", editPage)
 	server.HandleFunc("/site/view", viewPage)
 
