@@ -313,3 +313,113 @@ func ConnectDatabases() (DatabaseContext, func(), error) {
 			driver.Close(ctx)
 		}, nil
 }
+
+func CleanDBs(ctx DatabaseContext) error {
+	direntries, err := os.ReadDir("files/")
+	if err != nil {
+		return errorWithContext{err, "Failed to get directory files"}
+	}
+	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx.njctx)
+	ids_, err := neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx.njctx, `
+MATCH (r:Resource)
+RETURN r.id as RR ORDER BY r.id`,
+			nil,
+		)
+		if err != nil {
+			log.Println("database transaction error")
+			return nil, err
+		}
+		recs, err := res.Collect(ctx.njctx)
+		if err != nil {
+			log.Println("collect error")
+			return nil, err
+		}
+		var ids []string
+		if len(recs) == 0 {
+			return ids, nil
+		}
+		for _, rec := range recs {
+			a, ok := rec.Get("RR")
+			if !ok {
+				log.Println("RR error")
+				return nil, err
+			}
+			b, ok := a.(string)
+			if !ok {
+				log.Println("cast error")
+				return nil, err
+			}
+			ids = append(ids, b)
+		}
+		return ids, nil
+	})
+	if err != nil {
+		log.Println("database error", err)
+		return err
+	}
+	dbdel := func(did string) {
+		_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+			_, err := tx.Run(ctx.njctx, `
+MATCH (r:Resource {id: $fid})
+DETACH DELETE r`,
+				map[string]any{"fid": did},
+			)
+			if err != nil {
+				log.Println("database transaction error")
+				return nil, err
+			}
+			return nil, nil
+		})
+		if err != nil {
+			log.Println("Could not remove database entry", did, err)
+		}
+	}
+	osdel := func(fid string) {
+		log.Println("removing file:", fid)
+		err := os.Remove("files/" + fid)
+		if err != nil {
+			log.Println("Could not remove file", fid, err)
+		}
+	}
+	ids := ids_.([]string)
+	var fcur, dcur int
+	for fcur < len(direntries) && dcur < len(ids) {
+		var fstr, dstr string
+		if direntries[fcur].IsDir() {
+			fcur++
+			continue
+		}
+		fstr, dstr = direntries[fcur].Name(), ids[dcur]
+		if fstr == dstr {
+			fcur++
+			dcur++
+			continue
+		}
+		if fstr < dstr {
+			osdel(fstr)
+			fcur++
+			continue
+		}
+		// dstr > fstr
+		log.Println("removing dben:", dstr)
+		dbdel(dstr)
+		dcur++
+		continue
+	}
+	log.Println("Clearing remaining hanging records")
+	for fcur == len(direntries) && dcur < len(ids) {
+		dbdel(ids[dcur])
+		dcur++
+	}
+	for dcur == len(ids) && fcur < len(direntries) {
+		if direntries[fcur].IsDir() {
+			fcur++
+			continue
+		}
+		osdel(direntries[fcur].Name())
+		fcur++
+	}
+	return nil
+}

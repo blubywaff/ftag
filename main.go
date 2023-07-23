@@ -396,6 +396,9 @@ func debugMiddleWare(prefix string, next http.Handler) http.Handler {
 }
 
 func main() {
+    // Declare limited flags
+    var cleanupFlag = flag.Bool("c", false, "if the database should be cleaned on startup")
+
     // Parse flags
     flag.Parse()
 
@@ -412,6 +415,15 @@ func main() {
         log.Fatal(err)
     }
     defer dbclose()
+
+    if *cleanupFlag {
+        err := lib.CleanDBs(dbctx)
+        if err != nil {
+            log.Println("Failed to clean up dbs", err)
+        } else {
+            log.Println("Cleaned databases")
+        }
+    }
 
     server := http.NewServeMux()
 
