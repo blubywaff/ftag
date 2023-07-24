@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"html/template"
 	"io"
 	"log"
@@ -9,26 +10,23 @@ import (
 	"strconv"
 	"strings"
 	"time"
-    "flag"
-
-	"github.com/blubywaff/ftag/lib"
 )
 
 var templates *template.Template
 
-var dbctx lib.DatabaseContext
+var dbctx DatabaseContext
 
 var baseUrlFlag = flag.String("urlbase", "", "Specifies the base url for the server. Should include only path, without origin.")
 var baseUrl string
 
 type PageMeta struct {
-    Title string
+	Title string
 }
 
 type ClarifySession struct {
-    ResourceId string
-    FailedAddTags []string
-    FailedDelTags []string
+	ResourceId    string
+	FailedAddTags []string
+	FailedDelTags []string
 }
 
 func landingPage(res http.ResponseWriter, req *http.Request) {
@@ -39,16 +37,16 @@ func landingPage(res http.ResponseWriter, req *http.Request) {
 func uploadPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method == "GET" {
 		err := templates.ExecuteTemplate(
-            res,
-            "upload.gohtml",
-            struct {
-                PageMeta PageMeta
-            }{
-                PageMeta {
-                    "Upload",
-                },
-            },
-        )
+			res,
+			"upload.gohtml",
+			struct {
+				PageMeta PageMeta
+			}{
+				PageMeta{
+					"Upload",
+				},
+			},
+		)
 		if err != nil {
 			res.WriteHeader(500)
 			log.Println("error with upload.gohtml")
@@ -59,8 +57,8 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(405)
 		return
 	}
-    // 64 megabytes
-    // consider using maltipart reader to avoid reading oversized uploads
+	// 64 megabytes
+	// consider using maltipart reader to avoid reading oversized uploads
 	err := req.ParseMultipartForm(1 << 26)
 	if err != nil {
 		res.WriteHeader(500)
@@ -75,44 +73,44 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 	}
 	defer f.Close()
 
-    var tags lib.TagSet
-    badtags := tags.FillFromString(req.FormValue("tags"))
+	var tags TagSet
+	badtags := tags.FillFromString(req.FormValue("tags"))
 
-    id, err := lib.AddFile(dbctx, f, tags)
-    if err != nil {
-        log.Print(err.Error())
-        http.Error(res, "Database Error", 500)
-        return
-    }
-    if len(badtags) != 0 {
-        sessionId, err := lib.GenUUID()
-        if err != nil {
-            http.Error(res, "", 500)
-            return
-        }
-        lib.SetInSessionDB(dbctx, sessionId, ClarifySession { ResourceId: id, FailedAddTags: badtags } )
+	id, err := AddFile(dbctx, f, tags)
+	if err != nil {
+		log.Print(err.Error())
+		http.Error(res, "Database Error", 500)
+		return
+	}
+	if len(badtags) != 0 {
+		sessionId, err := GenUUID()
+		if err != nil {
+			http.Error(res, "", 500)
+			return
+		}
+		SetInSessionDB(dbctx, sessionId, ClarifySession{ResourceId: id, FailedAddTags: badtags})
 
-        res.Header().Add("location", baseUrl+"/site/edit?session="+sessionId)
-        res.WriteHeader(303)
-        return
-    }
-    res.Header().Add("location", baseUrl+"/site/edit?id="+id)
-    res.WriteHeader(303)
+		res.Header().Add("location", baseUrl+"/site/edit?session="+sessionId)
+		res.WriteHeader(303)
+		return
+	}
+	res.Header().Add("location", baseUrl+"/site/edit?id="+id)
+	res.WriteHeader(303)
 }
 
 func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method == "GET" {
 		err := templates.ExecuteTemplate(
-            res,
-            "multiupload.gohtml",
-            struct {
-                PageMeta PageMeta
-            }{
-                PageMeta {
-                    "Upload",
-                },
-            },
-        )
+			res,
+			"multiupload.gohtml",
+			struct {
+				PageMeta PageMeta
+			}{
+				PageMeta{
+					"Upload",
+				},
+			},
+		)
 		if err != nil {
 			res.WriteHeader(500)
 			log.Println("error with multiupload.gohtml")
@@ -123,8 +121,8 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(405)
 		return
 	}
-    // 1024 megabytes
-    // consider using maltipart reader to avoid reading oversized uploads
+	// 1024 megabytes
+	// consider using maltipart reader to avoid reading oversized uploads
 	err := req.ParseMultipartForm(1 << 30)
 	if err != nil {
 		res.WriteHeader(500)
@@ -132,300 +130,300 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-    var tags lib.TagSet
-    badtags := tags.FillFromString(req.FormValue("tags"))
-    if len(badtags) != 0 {
-        http.Error(res, "Some tags were invalid, multiupload aborted.", 400)
-        return
-    }
+	var tags TagSet
+	badtags := tags.FillFromString(req.FormValue("tags"))
+	if len(badtags) != 0 {
+		http.Error(res, "Some tags were invalid, multiupload aborted.", 400)
+		return
+	}
 
-    fhs := req.MultipartForm.File["uploadfile"]
-    for _, fh := range fhs {
-        f, err := fh.Open()
-        if err != nil {
-            log.Println("failed to open file from fileheader", err)
-            continue // safety measure TODO figure this out
-        }
-        defer f.Close()
-        _, err = lib.AddFile(dbctx, f, tags)
-        if err != nil {
-            log.Println("failed to write file to database", err)
-            continue // TODO there should be some failure mode here
-        }
-    }
+	fhs := req.MultipartForm.File["uploadfile"]
+	for _, fh := range fhs {
+		f, err := fh.Open()
+		if err != nil {
+			log.Println("failed to open file from fileheader", err)
+			continue // safety measure TODO figure this out
+		}
+		defer f.Close()
+		_, err = AddFile(dbctx, f, tags)
+		if err != nil {
+			log.Println("failed to write file to database", err)
+			continue // TODO there should be some failure mode here
+		}
+	}
 
-    res.Header().Add("location", baseUrl+"/site/view")
-    res.WriteHeader(303)
+	res.Header().Add("location", baseUrl+"/site/view")
+	res.WriteHeader(303)
 }
 
 func editPage(res http.ResponseWriter, req *http.Request) {
-    if (req.Method != "GET" && req.Method != "POST") {
-        res.WriteHeader(405)
-        return
-    }
-    id := req.URL.Query().Get("id")
-    sessionId := req.URL.Query().Get("session")
-    if id == "" && sessionId == "" {
-        http.Error(res, "Must have non-empty id or session", 400)
-        return
-    }
-    var editSession ClarifySession
-    if sessionId != "" {
-        _editSession, err := lib.GetFromSessionDB(dbctx, sessionId)
-        if err != nil {
-            http.Error(res, "Invalid session", 400)
-            return
-        }
-        var ok bool
-        editSession, ok = _editSession.(ClarifySession)
-        if !ok {
-            http.Error(res, "Invalid edit session", 400)
-            return
-        }
-        if id != "" && id != editSession.ResourceId {
-            http.Error(res, "session and fallback id conflict", 400)
-        }
-        id = editSession.ResourceId
-    }
-    if (req.Method == "GET") {
-        rsrc, err := lib.GetFile(dbctx, id)
-        if err != nil {
-            http.Error(res, "Database error", 500)
-            return
-        }
+	if req.Method != "GET" && req.Method != "POST" {
+		res.WriteHeader(405)
+		return
+	}
+	id := req.URL.Query().Get("id")
+	sessionId := req.URL.Query().Get("session")
+	if id == "" && sessionId == "" {
+		http.Error(res, "Must have non-empty id or session", 400)
+		return
+	}
+	var editSession ClarifySession
+	if sessionId != "" {
+		_editSession, err := GetFromSessionDB(dbctx, sessionId)
+		if err != nil {
+			http.Error(res, "Invalid session", 400)
+			return
+		}
+		var ok bool
+		editSession, ok = _editSession.(ClarifySession)
+		if !ok {
+			http.Error(res, "Invalid edit session", 400)
+			return
+		}
+		if id != "" && id != editSession.ResourceId {
+			http.Error(res, "session and fallback id conflict", 400)
+		}
+		id = editSession.ResourceId
+	}
+	if req.Method == "GET" {
+		rsrc, err := GetFile(dbctx, id)
+		if err != nil {
+			http.Error(res, "Database error", 500)
+			return
+		}
 		err = templates.ExecuteTemplate(
-            res,
-            "edit.gohtml",
-            struct {
-                PageMeta PageMeta
-                Resource lib.Resource
-                Session ClarifySession
-            }{
-                PageMeta {
-                    "Editing " + id,
-                },
-                rsrc,
-                editSession,
-            },
-        )
+			res,
+			"edit.gohtml",
+			struct {
+				PageMeta PageMeta
+				Resource Resource
+				Session  ClarifySession
+			}{
+				PageMeta{
+					"Editing " + id,
+				},
+				rsrc,
+				editSession,
+			},
+		)
 		if err != nil {
 			res.WriteHeader(500)
 			log.Println("error with edit.gohtml", err)
-            return
+			return
 		}
 		return
-    }
+	}
 
-    formReader, err := req.MultipartReader()
-    if err != nil {
-        log.Println("could not open multipart reader", err)
-        res.WriteHeader(500)
-        return
-    }
-    var addtags, deltags lib.TagSet
-    var session ClarifySession
-    for {
-        part, err := formReader.NextPart()
-        if err == io.EOF {
-            break
-        }
-        if err != nil {
-            log.Println("failed on form part", err)
-            res.WriteHeader(500)
-            return
-        }
-        switch part.FormName() {
-        case "addtags":
-            buf := new(bytes.Buffer)
-            buf.ReadFrom(part)
-            if buf.Len() == 0 {
-                continue
-            }
-            session.FailedAddTags = addtags.FillFromString(buf.String())
-        case "deltags":
-            buf := new(bytes.Buffer)
-            buf.ReadFrom(part)
-            if buf.Len() == 0 {
-                continue
-            }
-            session.FailedDelTags = deltags.FillFromString(buf.String())
-        default:
-            http.Error(res, "invalid field in form", 400)
-            return
-        }
-    }
+	formReader, err := req.MultipartReader()
+	if err != nil {
+		log.Println("could not open multipart reader", err)
+		res.WriteHeader(500)
+		return
+	}
+	var addtags, deltags TagSet
+	var session ClarifySession
+	for {
+		part, err := formReader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Println("failed on form part", err)
+			res.WriteHeader(500)
+			return
+		}
+		switch part.FormName() {
+		case "addtags":
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(part)
+			if buf.Len() == 0 {
+				continue
+			}
+			session.FailedAddTags = addtags.FillFromString(buf.String())
+		case "deltags":
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(part)
+			if buf.Len() == 0 {
+				continue
+			}
+			session.FailedDelTags = deltags.FillFromString(buf.String())
+		default:
+			http.Error(res, "invalid field in form", 400)
+			return
+		}
+	}
 
-    if addtags.Len() == 0 && deltags.Len() == 0 && len(session.FailedAddTags) == 0 && len(session.FailedDelTags) == 0 {
-        http.Error(res, "empty form", 400)
-        return
-    }
+	if addtags.Len() == 0 && deltags.Len() == 0 && len(session.FailedAddTags) == 0 && len(session.FailedDelTags) == 0 {
+		http.Error(res, "empty form", 400)
+		return
+	}
 
-    if err := lib.ChangeTags(dbctx, addtags, deltags, id); err != nil {
-        log.Println("database failure on changetags", err)
-        res.WriteHeader(500)
-        return
-    }
+	if err := ChangeTags(dbctx, addtags, deltags, id); err != nil {
+		log.Println("database failure on changetags", err)
+		res.WriteHeader(500)
+		return
+	}
 
-    if len(session.FailedAddTags) != 0 || len(session.FailedDelTags) != 0 {
-        newSessionId, err := lib.GenUUID()
-        if err != nil {
-            http.Error(res, "", 500)
-            return
-        }
-        lib.RemoveFromSessionDB(dbctx, sessionId)
-        lib.SetInSessionDB(dbctx, newSessionId, ClarifySession { ResourceId: id, FailedAddTags: session.FailedAddTags, FailedDelTags: session.FailedDelTags } )
+	if len(session.FailedAddTags) != 0 || len(session.FailedDelTags) != 0 {
+		newSessionId, err := GenUUID()
+		if err != nil {
+			http.Error(res, "", 500)
+			return
+		}
+		RemoveFromSessionDB(dbctx, sessionId)
+		SetInSessionDB(dbctx, newSessionId, ClarifySession{ResourceId: id, FailedAddTags: session.FailedAddTags, FailedDelTags: session.FailedDelTags})
 
-        res.Header().Add("location", baseUrl+"/site/edit?session="+newSessionId)
-        res.WriteHeader(303)
-        return
-    }
+		res.Header().Add("location", baseUrl+"/site/edit?session="+newSessionId)
+		res.WriteHeader(303)
+		return
+	}
 
-    res.Header().Add("location", baseUrl+"/site/view")
-    res.WriteHeader(303)
-    return
+	res.Header().Add("location", baseUrl+"/site/view")
+	res.WriteHeader(303)
+	return
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method != "GET" {
-        res.WriteHeader(405)
-        return
+		res.WriteHeader(405)
+		return
 	}
-    if !strings.Contains(req.URL.String(), "?") {
-        err := templates.ExecuteTemplate(
-            res,
-            "view.gohtml",
-            struct {
-                PageMeta PageMeta;
-                Resource interface{};
-                Index string;
-            } {
-                PageMeta {
-                    Title: "Viewer",
-                },
-                nil,
-                "",
-            },
-        ) 
-        if err != nil {
-            res.WriteHeader(500)
-            log.Println("error with view.gohtml", err)
-        }
-        return
-    }
-    var intag, extag lib.TagSet
-    var exmode string
-    var index int
-    intagstr, ok := req.URL.Query()["intags"]
-    if !ok {
-        http.Error(res, "Missing include tags field", 400)
-        return
-    }
-    intag.FillFromString(intagstr[0])
-    extagstr, ok := req.URL.Query()["extags"]
-    if !ok {
-        http.Error(res, "Missing exclude tags field", 400)
-        return
-    }
-    extag.FillFromString(extagstr[0])
-    exmodestr, ok := req.URL.Query()["exmode"]
-    if !ok {
-        http.Error(res, "Missing exmode field", 400)
-        return
-    }
-    exmode = exmodestr[0]
-    if exmode != "or" && exmode != "and" {
-        http.Error(res, "Invalid exlude mode", 400)
-        return
-    }
-    numerstr, ok := req.URL.Query()["number"]
-    if !ok {
-        http.Error(res, "Missing number field", 400)
-        return
-    }
-    index, err := strconv.Atoi(numerstr[0])
-    if err != nil {
-        http.Error(res, "invalid number", 400)
-        return
-    }
-    if index < 1 {
-        http.Error(res, "exceed list beginning", 400)
-        return
-    }
-    rsrc, err := lib.TagQuery(dbctx, intag, extag, exmode, index - 1)
-    if err == lib.NO_RESULT {
-        if index == 1 {
-            http.Error(res, "no result", 400)
-            return
-        }
-        http.Error(res, "exceed list end", 400)
-        return
-    }
-    if err != nil {
-        res.WriteHeader(500)
-        log.Println("err with viewPage db TagQuery", err)
-        return
-    }
-    err = templates.ExecuteTemplate(
-        res,
-        "view.gohtml",
-        struct {
-            PageMeta PageMeta;
-            Resource lib.Resource;
-            PrevLink string;
-            NextLink string;
-        } {
-            PageMeta {
-                Title: "Viewing " + rsrc.Id,
-            },
-            rsrc,
-            baseUrl + req.URL.Path + "?number="+strconv.Itoa(index-1) + "&intags="+intagstr[0] + "&extags="+extagstr[0] + "&exmode="+exmode,
-            baseUrl + req.URL.Path + "?number="+strconv.Itoa(index+1) + "&intags="+intagstr[0] + "&extags="+extagstr[0] + "&exmode="+exmode,
-        },
-    ) 
-    if err != nil {
-        res.WriteHeader(500)
-        log.Println("error with view.gohtml", err)
-    }
+	if !strings.Contains(req.URL.String(), "?") {
+		err := templates.ExecuteTemplate(
+			res,
+			"view.gohtml",
+			struct {
+				PageMeta PageMeta
+				Resource interface{}
+				Index    string
+			}{
+				PageMeta{
+					Title: "Viewer",
+				},
+				nil,
+				"",
+			},
+		)
+		if err != nil {
+			res.WriteHeader(500)
+			log.Println("error with view.gohtml", err)
+		}
+		return
+	}
+	var intag, extag TagSet
+	var exmode string
+	var index int
+	intagstr, ok := req.URL.Query()["intags"]
+	if !ok {
+		http.Error(res, "Missing include tags field", 400)
+		return
+	}
+	intag.FillFromString(intagstr[0])
+	extagstr, ok := req.URL.Query()["extags"]
+	if !ok {
+		http.Error(res, "Missing exclude tags field", 400)
+		return
+	}
+	extag.FillFromString(extagstr[0])
+	exmodestr, ok := req.URL.Query()["exmode"]
+	if !ok {
+		http.Error(res, "Missing exmode field", 400)
+		return
+	}
+	exmode = exmodestr[0]
+	if exmode != "or" && exmode != "and" {
+		http.Error(res, "Invalid exlude mode", 400)
+		return
+	}
+	numerstr, ok := req.URL.Query()["number"]
+	if !ok {
+		http.Error(res, "Missing number field", 400)
+		return
+	}
+	index, err := strconv.Atoi(numerstr[0])
+	if err != nil {
+		http.Error(res, "invalid number", 400)
+		return
+	}
+	if index < 1 {
+		http.Error(res, "exceed list beginning", 400)
+		return
+	}
+	rsrc, err := TagQuery(dbctx, intag, extag, exmode, index-1)
+	if err == NO_RESULT {
+		if index == 1 {
+			http.Error(res, "no result", 400)
+			return
+		}
+		http.Error(res, "exceed list end", 400)
+		return
+	}
+	if err != nil {
+		res.WriteHeader(500)
+		log.Println("err with viewPage db TagQuery", err)
+		return
+	}
+	err = templates.ExecuteTemplate(
+		res,
+		"view.gohtml",
+		struct {
+			PageMeta PageMeta
+			Resource Resource
+			PrevLink string
+			NextLink string
+		}{
+			PageMeta{
+				Title: "Viewing " + rsrc.Id,
+			},
+			rsrc,
+			baseUrl + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
+			baseUrl + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
+		},
+	)
+	if err != nil {
+		res.WriteHeader(500)
+		log.Println("error with view.gohtml", err)
+	}
 }
 
 func debugMiddleWare(prefix string, next http.Handler) http.Handler {
-    return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
-        log.Println(prefix + " req url: " + req.URL.String())
-        next.ServeHTTP(res, req)
-    })
+	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		log.Println(prefix + " req url: " + req.URL.String())
+		next.ServeHTTP(res, req)
+	})
 }
 
 func main() {
-    // Declare limited flags
-    var cleanupFlag = flag.Bool("c", false, "if the database should be cleaned on startup")
+	// Declare limited flags
+	var cleanupFlag = flag.Bool("c", false, "if the database should be cleaned on startup")
 
-    // Parse flags
-    flag.Parse()
+	// Parse flags
+	flag.Parse()
 
-    baseUrl = *baseUrlFlag
+	baseUrl = *baseUrlFlag
 
 	// Load Templates
-    templates = template.Must(template.New("").Funcs(map[string]any {"hasPrefix": strings.HasPrefix, "getBaseUrl": func() (string) { return baseUrl }}).ParseGlob("./templates/*.gohtml"))
+	templates = template.Must(template.New("").Funcs(map[string]any{"hasPrefix": strings.HasPrefix, "getBaseUrl": func() string { return baseUrl }}).ParseGlob("./templates/*.gohtml"))
 
 	// Load database connection
-    var dbclose func()()
-    var err error
-    dbctx, dbclose, err = lib.ConnectDatabases()
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer dbclose()
+	var dbclose func()
+	var err error
+	dbctx, dbclose, err = ConnectDatabases()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dbclose()
 
-    if *cleanupFlag {
-        err := lib.CleanDBs(dbctx)
-        if err != nil {
-            log.Println("Failed to clean up dbs", err)
-        } else {
-            log.Println("Cleaned databases")
-        }
-    }
+	if *cleanupFlag {
+		err := CleanDBs(dbctx)
+		if err != nil {
+			log.Println("Failed to clean up dbs", err)
+		} else {
+			log.Println("Cleaned databases")
+		}
+	}
 
-    server := http.NewServeMux()
+	server := http.NewServeMux()
 
 	statfs := http.FileServer(http.Dir("./dist"))
 	filefs := http.FileServer(http.Dir("./files"))
@@ -437,7 +435,6 @@ func main() {
 	server.HandleFunc("/site/upload/many", multiuploadPage)
 	server.HandleFunc("/site/edit", editPage)
 	server.HandleFunc("/site/view", viewPage)
-
 
 	log.Fatal(http.ListenAndServe(":8080", http.StripPrefix(baseUrl, server)))
 }

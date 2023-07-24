@@ -1,4 +1,4 @@
-package lib
+package main
 
 type errorWithContext struct {
 	original error
