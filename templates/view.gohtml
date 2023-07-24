@@ -18,6 +18,14 @@
                 {{range .Resource.Tags}}
                     <p class="py-1 px-2 rounded-full bg-gray-300 text-gray-800 inline-block mb-2 text-center">{{.}}</p>
                 {{end}}
+                <details class="flex justify-center">
+                    <summary>
+                        <span class="font-bold">Edit</span>
+                    </summary>
+                    <div class="w-full flex justify-center">
+                        {{template "editform" .Resource.Id}}
+                    </div>
+                </details>
             </div>
         </details>
         {{template "preview" .Resource}}

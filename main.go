@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"html/template"
 	"io"
@@ -18,6 +19,12 @@ var dbctx DatabaseContext
 
 var baseUrlFlag = flag.String("urlbase", "", "Specifies the base url for the server. Should include only path, without origin.")
 var baseUrl string
+
+var (
+	INVALID_FORM_FIELD       = errors.New("invalid field in form")
+	EMPTY_FORM               = errors.New("empty form")
+	MISSING_FORM_REQUIREMENT = errors.New("required form field not present")
+)
 
 type PageMeta struct {
 	Title string
@@ -156,6 +163,66 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(303)
 }
 
+func editreqLogic(req *http.Request) (ClarifySession, error) {
+	formReader, err := req.MultipartReader()
+	if err != nil {
+		err = errorWithContext{err, "could not open multipart reader"}
+		log.Println(err)
+		return ClarifySession{}, err
+	}
+	var addtags, deltags TagSet
+	var session ClarifySession
+	for {
+		part, err := formReader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			err = errorWithContext{err, "failed on form part"}
+			return ClarifySession{}, err
+		}
+		switch part.FormName() {
+		case "addtags":
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(part)
+			if buf.Len() == 0 {
+				continue
+			}
+			session.FailedAddTags = addtags.FillFromString(buf.String())
+		case "deltags":
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(part)
+			if buf.Len() == 0 {
+				continue
+			}
+			session.FailedDelTags = deltags.FillFromString(buf.String())
+		case "resourceid":
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(part)
+			if buf.Len() == 0 {
+				continue
+			}
+			session.ResourceId = buf.String()
+		default:
+			return ClarifySession{}, INVALID_FORM_FIELD
+		}
+	}
+
+	if session.ResourceId == "" {
+		return ClarifySession{}, MISSING_FORM_REQUIREMENT
+	}
+
+	if addtags.Len() == 0 && deltags.Len() == 0 && len(session.FailedAddTags) == 0 && len(session.FailedDelTags) == 0 {
+		return ClarifySession{}, EMPTY_FORM
+	}
+
+	if err := ChangeTags(dbctx, addtags, deltags, session.ResourceId); err != nil {
+		err = errorWithContext{err, "database failure on changetags"}
+		return ClarifySession{}, err
+	}
+	return session, nil
+}
+
 func editPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method != "GET" && req.Method != "POST" {
 		res.WriteHeader(405)
@@ -214,56 +281,20 @@ func editPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	formReader, err := req.MultipartReader()
-	if err != nil {
-		log.Println("could not open multipart reader", err)
-		res.WriteHeader(500)
-		return
+	session, err := editreqLogic(req)
+	if err == nil {
+		goto editpage_logic_noerr
 	}
-	var addtags, deltags TagSet
-	var session ClarifySession
-	for {
-		part, err := formReader.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			log.Println("failed on form part", err)
-			res.WriteHeader(500)
-			return
-		}
-		switch part.FormName() {
-		case "addtags":
-			buf := new(bytes.Buffer)
-			buf.ReadFrom(part)
-			if buf.Len() == 0 {
-				continue
-			}
-			session.FailedAddTags = addtags.FillFromString(buf.String())
-		case "deltags":
-			buf := new(bytes.Buffer)
-			buf.ReadFrom(part)
-			if buf.Len() == 0 {
-				continue
-			}
-			session.FailedDelTags = deltags.FillFromString(buf.String())
-		default:
-			http.Error(res, "invalid field in form", 400)
-			return
-		}
-	}
-
-	if addtags.Len() == 0 && deltags.Len() == 0 && len(session.FailedAddTags) == 0 && len(session.FailedDelTags) == 0 {
+	if err == EMPTY_FORM {
 		http.Error(res, "empty form", 400)
 		return
 	}
-
-	if err := ChangeTags(dbctx, addtags, deltags, id); err != nil {
-		log.Println("database failure on changetags", err)
-		res.WriteHeader(500)
+	if err == INVALID_FORM_FIELD {
+		http.Error(res, "invalid field in form", 400)
 		return
 	}
 
+editpage_logic_noerr:
 	if len(session.FailedAddTags) != 0 || len(session.FailedDelTags) != 0 {
 		newSessionId, err := GenUUID()
 		if err != nil {
@@ -278,12 +309,23 @@ func editPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	res.Header().Add("location", baseUrl+"/site/view")
+	res.Header().Add("location", baseUrl+"/site/edit?id="+id)
 	res.WriteHeader(303)
 	return
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
+	if req.Method == "POST" {
+		_, err := editreqLogic(req)
+		if err != nil {
+			err = errorWithContext{err, "failure of editreqlogic for view page"}
+			res.WriteHeader(500)
+			return
+		}
+		res.Header().Add("location", baseUrl+req.URL.RequestURI())
+		res.WriteHeader(303)
+		return
+	}
 	if req.Method != "GET" {
 		res.WriteHeader(405)
 		return
