@@ -10,7 +10,7 @@
             <a href="{{getBaseUrl}}/site/edit?id={{.Resource.Id}}" class="">Edit</a>
             <a href="{{.NextLink}}" class="">Next</a>
         </div>
-        <details open class="">
+        <details {{if not (eq .UserSettings.View.TagVisibility "none")}}open{{end}} class="">
             <summary class="">
                 <span class="font-bold">Tags</span>
             </summary>
@@ -18,7 +18,7 @@
                 {{range .Resource.Tags}}
                     <p class="py-1 px-2 rounded-full bg-gray-300 text-gray-800 inline-block mb-2 text-center">{{.}}</p>
                 {{end}}
-                <details class="flex justify-center">
+                <details class="flex justify-center" {{if eq .UserSettings.View.TagVisibility "edit"}}open{{end}}>
                     <summary>
                         <span class="font-bold">Edit</span>
                     </summary>

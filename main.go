@@ -25,27 +25,7 @@ var (
 )
 
 type ctxkeyConfig int
-
-type Config_Neo4j struct {
-	Username string
-	Password string
-	Url      string
-}
-
-type Config struct {
-	Neo4j   Config_Neo4j
-	UrlBase string
-}
-
-type PageMeta struct {
-	Title string
-}
-
-type ClarifySession struct {
-	ResourceId    string
-	FailedAddTags []string
-	FailedDelTags []string
-}
+type ctxkeyUserSettings int
 
 func landingPage(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(200)
@@ -407,6 +387,9 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "exceed list beginning", 400)
 		return
 	}
+	ust := req.Context().Value(ctxkeyUserSettings(0)).(UserSettings)
+	// Adds all user default exclusions that are not specifically included
+	extag.Union(*ust.View.DefaultExcludes.Duplicate().Difference(intag))
 	rsrc, err := TagQuery(req.Context(), intag, extag, exmode, index-1)
 	if err == NO_RESULT {
 		if index == 1 {
@@ -425,10 +408,11 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		res,
 		"view.gohtml",
 		struct {
-			PageMeta PageMeta
-			Resource Resource
-			PrevLink string
-			NextLink string
+			PageMeta     PageMeta
+			Resource     Resource
+			PrevLink     string
+			NextLink     string
+			UserSettings UserSettings
 		}{
 			PageMeta{
 				Title: "Viewing " + rsrc.Id,
@@ -436,12 +420,53 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 			rsrc,
 			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
 			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
+			ust,
 		},
 	)
 	if err != nil {
 		res.WriteHeader(500)
 		log.Println("error with view.gohtml", err)
 	}
+}
+
+func settingsPage(res http.ResponseWriter, req *http.Request) {
+	if req.Method == "GET" {
+		us := req.Context().Value(ctxkeyUserSettings(0)).(UserSettings)
+		err := templates.ExecuteTemplate(res, "settings.gohtml", struct {
+			PageMeta     PageMeta
+			UserSettings UserSettings
+		}{
+			PageMeta{"Settings"},
+			us,
+		})
+		if err != nil {
+			log.Println("error with settings.gothml:", err)
+			return
+		}
+		return
+	}
+	if req.Method != "POST" {
+		res.WriteHeader(405)
+		return
+	}
+	var ust UserSettings
+	req.ParseForm()
+	ust.View.TagVisibility = req.FormValue("view-tags")
+	ust.View.DefaultExcludes.FillFromString(req.FormValue("def-ex"))
+	if err := ust.Verify(); err != nil {
+		log.Println("Failed to verify settings submission", err)
+		http.Error(res, "Invalid value", 400)
+		return
+	}
+	str, err := ust.ToCookieString()
+	if err != nil {
+		log.Println("Failed to get cookie string", err)
+		res.WriteHeader(500)
+		return
+	}
+	http.SetCookie(res, &http.Cookie{Name: "settings", Value: str})
+	res.Header().Add("location", req.Context().Value(ctxkeyConfig(0)).(Config).UrlBase+"/site/settings")
+	res.WriteHeader(303)
 }
 
 func debugMiddleWare(prefix string, next http.Handler) http.Handler {
@@ -454,6 +479,24 @@ func debugMiddleWare(prefix string, next http.Handler) http.Handler {
 func addContext(ctx context.Context, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		next.ServeHTTP(res, req.WithContext(ctx))
+	})
+}
+
+func attachUserSettings(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
+		var userSettings UserSettings
+		cookie, err := req.Cookie("settings")
+		if err == http.ErrNoCookie {
+			userSettings = DefaultUserSettings
+			goto gonext
+		}
+		err = userSettings.FromCookieString(cookie.Value)
+		if err != nil {
+			log.Println("Could not get userSettings:", err)
+		}
+	gonext:
+		next.ServeHTTP(res, req.WithContext(context.WithValue(ctx, ctxkeyUserSettings(0), userSettings)))
 	})
 }
 
@@ -480,7 +523,11 @@ func main() {
 	ctx = context.WithValue(ctx, ctxkeyConfig(0), config)
 
 	// Load Templates
-	templates = template.Must(template.New("").Funcs(map[string]any{"hasPrefix": strings.HasPrefix, "getBaseUrl": func() string { return config.UrlBase }}).ParseGlob("./templates/*.gohtml"))
+	templates = template.Must(template.New("").Funcs(map[string]any{
+		"hasPrefix":   strings.HasPrefix,
+		"getBaseUrl":  func() string { return config.UrlBase },
+		"stringifyTS": func(ts TagSet) string { return ts.String() },
+	}).ParseGlob("./templates/*.gohtml"))
 
 	// Load database connection
 	var dbclose func()
@@ -511,6 +558,7 @@ func main() {
 	server.HandleFunc("/site/upload/many", multiuploadPage)
 	server.HandleFunc("/site/edit", editPage)
 	server.HandleFunc("/site/view", viewPage)
+	server.HandleFunc("/site/settings", settingsPage)
 
-	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, http.StripPrefix(config.UrlBase, server))))
+	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, attachUserSettings(http.StripPrefix(config.UrlBase, server)))))
 }
