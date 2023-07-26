@@ -17,27 +17,26 @@ import (
 
 var NO_RESULT error = errors.New("database no result")
 
-type DatabaseContext struct {
-	neo4jdriver neo4j.DriverWithContext
-	njctx       context.Context
-	sessiondb   map[string]any
-}
+type ctxkeyNeo4jDriver int
+type ctxkeyMemDB int
 
-func SetInSessionDB(ctx DatabaseContext, id string, record any) error {
-	ctx.sessiondb[id] = record
+type MemDB map[string]any
+
+func SetInSessionDB(ctx context.Context, id string, record any) error {
+	ctx.Value(ctxkeyMemDB(0)).(MemDB)[id] = record
 	return nil
 }
 
-func GetFromSessionDB(ctx DatabaseContext, id string) (any, error) {
-	record, ok := ctx.sessiondb[id]
+func GetFromSessionDB(ctx context.Context, id string) (any, error) {
+	record, ok := ctx.Value(ctxkeyMemDB(0)).(MemDB)[id]
 	if !ok {
 		return nil, errors.New("does not exist")
 	}
 	return record, nil
 }
 
-func RemoveFromSessionDB(ctx DatabaseContext, id string) error {
-	delete(ctx.sessiondb, id)
+func RemoveFromSessionDB(ctx context.Context, id string) error {
+	delete(ctx.Value(ctxkeyMemDB(0)).(MemDB), id)
 	return nil
 }
 
@@ -51,7 +50,7 @@ func GenUUID() (string, error) {
 }
 
 // returns id of the resource if created (err == nil)
-func AddFile(ctx DatabaseContext, f io.Reader, tags TagSet) (string, error) {
+func AddFile(ctx context.Context, f io.Reader, tags TagSet) (string, error) {
 	id, mimetype, fir := writeFileReversible(f)
 	if err := fir.OpError(); err != nil {
 		err = errorWithContext{err, "Failed to add file due to file write error"}
@@ -59,10 +58,10 @@ func AddFile(ctx DatabaseContext, f io.Reader, tags TagSet) (string, error) {
 		return "", err
 	}
 
-	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer neo4jsession.Close(ctx.njctx)
-	_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		_, err := tx.Run(ctx.njctx, `
+	neo4jsession := ctx.Value(ctxkeyNeo4jDriver(0)).(neo4j.DriverWithContext).NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx)
+	_, err := neo4jsession.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, `
 CREATE (a:Resource {id: $fid, createdAt: datetime($date), type: $type})
 FOREACH (tag in $tags |
     MERGE (t:Tag {name: tag})
@@ -145,11 +144,11 @@ func writeFileReversible(f io.Reader) (string, string, IntermediateResult) {
 	}
 }
 
-func GetFile(ctx DatabaseContext, id string) (Resource, error) {
-	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer neo4jsession.Close(ctx.njctx)
-	resource, err := neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx.njctx, `
+func GetFile(ctx context.Context, id string) (Resource, error) {
+	neo4jsession := ctx.Value(ctxkeyNeo4jDriver(0)).(neo4j.DriverWithContext).NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer neo4jsession.Close(ctx)
+	resource, err := neo4jsession.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx, `
 MATCH (r:Resource {id: $fid})<-[:describes]-(t:Tag)
 WITH collect(r) as r, collect(t) as t
 UNWIND r + t as RR
@@ -160,7 +159,7 @@ RETURN distinct RR`,
 			log.Println("database transaction error")
 			return nil, err
 		}
-		recs, err := res.Collect(ctx.njctx)
+		recs, err := res.Collect(ctx)
 		if err != nil {
 			log.Println("collect error")
 			return nil, err
@@ -197,11 +196,11 @@ RETURN distinct RR`,
 	return resource.(Resource), err
 }
 
-func ChangeTags(ctx DatabaseContext, addtags TagSet, deltags TagSet, id string) error {
-	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer neo4jsession.Close(ctx.njctx)
-	_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		_, err := tx.Run(ctx.njctx, `
+func ChangeTags(ctx context.Context, addtags TagSet, deltags TagSet, id string) error {
+	neo4jsession := ctx.Value(ctxkeyNeo4jDriver(0)).(neo4j.DriverWithContext).NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx)
+	_, err := neo4jsession.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, `
 MATCH (a:Resource {id: $fid})
 CALL {
     WITH a
@@ -228,10 +227,10 @@ CALL {
 	return nil
 }
 
-func TagQuery(ctx DatabaseContext, includes, excludes TagSet, excludeMode string, index int) (Resource, error) {
-	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer neo4jsession.Close(ctx.njctx)
-	rsrc, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
+func TagQuery(ctx context.Context, includes, excludes TagSet, excludeMode string, index int) (Resource, error) {
+	neo4jsession := ctx.Value(ctxkeyNeo4jDriver(0)).(neo4j.DriverWithContext).NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer neo4jsession.Close(ctx)
+	rsrc, err := neo4jsession.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		var expart string
 		if excludes.Len() != 0 {
 			if excludeMode == "or" {
@@ -241,7 +240,7 @@ func TagQuery(ctx DatabaseContext, includes, excludes TagSet, excludeMode string
 			}
 		}
 		res, err := tx.Run(
-			ctx.njctx, `
+			ctx, `
 MATCH (a:Resource)
 WHERE all(tag in $intag WHERE exists((:Tag {name: tag})-[:describes]->(a)))
 `+expart+`
@@ -258,7 +257,7 @@ RETURN RR`,
 		if err != nil {
 			return nil, err
 		}
-		recs, err := res.Collect(ctx.njctx)
+		recs, err := res.Collect(ctx)
 		if err != nil {
 			log.Println("collect error")
 			return nil, err
@@ -293,36 +292,36 @@ RETURN RR`,
 }
 
 // if the error return is nil, the caller must call returned callback to close the database connection
-func ConnectDatabases() (DatabaseContext, func(), error) {
-	// Create new ctx
-	ctx := context.Background()
+func ConnectDatabases(ctx context.Context) (context.Context, func(), error) {
+	config := ctx.Value(ctxkeyConfig(0)).(Config).Neo4j
+
 	// Load database connection
-	driver, err := neo4j.NewDriverWithContext("neo4j://localhost:7687", neo4j.NoAuth())
+	driver, err := neo4j.NewDriverWithContext(config.Url, neo4j.BasicAuth(config.Username, config.Password, ""))
 	if err != nil {
-		log.Fatal("cannot connect to database")
-		return DatabaseContext{}, func() {}, errorWithContext{err, "cannot connect to database"}
+		return ctx, func() {}, errorWithContext{err, "cannot connect to database"}
 	}
 
-	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	ctx = context.WithValue(ctx, "bluby_db_session", session)
-	return DatabaseContext{
-			driver,
-			ctx,
-			make(map[string]any),
-		}, func() {
-			driver.Close(ctx)
-		}, nil
+	err = driver.VerifyAuthentication(ctx, nil)
+	if err != nil {
+		driver.Close(ctx)
+		return ctx, func() {}, errorWithContext{err, "bad database connection"}
+	}
+
+	ctx = context.WithValue(ctx, ctxkeyNeo4jDriver(0), driver)
+	return ctx, func() {
+		driver.Close(ctx)
+	}, nil
 }
 
-func CleanDBs(ctx DatabaseContext) error {
+func CleanDBs(ctx context.Context) error {
 	direntries, err := os.ReadDir("files/")
 	if err != nil {
 		return errorWithContext{err, "Failed to get directory files"}
 	}
-	neo4jsession := ctx.neo4jdriver.NewSession(ctx.njctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer neo4jsession.Close(ctx.njctx)
-	ids_, err := neo4jsession.ExecuteRead(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx.njctx, `
+	neo4jsession := ctx.Value(ctxkeyNeo4jDriver(0)).(neo4j.DriverWithContext).NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer neo4jsession.Close(ctx)
+	ids_, err := neo4jsession.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx, `
 MATCH (r:Resource)
 RETURN r.id as RR ORDER BY r.id`,
 			nil,
@@ -331,7 +330,7 @@ RETURN r.id as RR ORDER BY r.id`,
 			log.Println("database transaction error")
 			return nil, err
 		}
-		recs, err := res.Collect(ctx.njctx)
+		recs, err := res.Collect(ctx)
 		if err != nil {
 			log.Println("collect error")
 			return nil, err
@@ -360,8 +359,8 @@ RETURN r.id as RR ORDER BY r.id`,
 		return err
 	}
 	dbdel := func(did string) {
-		_, err := neo4jsession.ExecuteWrite(ctx.njctx, func(tx neo4j.ManagedTransaction) (any, error) {
-			_, err := tx.Run(ctx.njctx, `
+		_, err := neo4jsession.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+			_, err := tx.Run(ctx, `
 MATCH (r:Resource {id: $fid})
 DETACH DELETE r`,
 				map[string]any{"fid": did},

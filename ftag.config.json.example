@@ -1,0 +1,8 @@
+{
+    "Neo4j": {
+        "Username": "neo4j",
+        "Password": "neo4j",
+        "Url": "bolt://localhost:7687"
+    },
+    "UrlBase": ""
+}

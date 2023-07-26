@@ -2,3 +2,4 @@ dist/
 files/
 # build artifact
 ftag
+ftag.config.json

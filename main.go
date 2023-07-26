@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,16 +18,24 @@ import (
 
 var templates *template.Template
 
-var dbctx DatabaseContext
-
-var baseUrlFlag = flag.String("urlbase", "", "Specifies the base url for the server. Should include only path, without origin.")
-var baseUrl string
-
 var (
 	INVALID_FORM_FIELD       = errors.New("invalid field in form")
 	EMPTY_FORM               = errors.New("empty form")
 	MISSING_FORM_REQUIREMENT = errors.New("required form field not present")
 )
+
+type ctxkeyConfig int
+
+type Config_Neo4j struct {
+	Username string
+	Password string
+	Url      string
+}
+
+type Config struct {
+	Neo4j   Config_Neo4j
+	UrlBase string
+}
 
 type PageMeta struct {
 	Title string
@@ -64,6 +75,7 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(405)
 		return
 	}
+	config := req.Context().Value(ctxkeyConfig(0)).(Config)
 	// 64 megabytes
 	// consider using maltipart reader to avoid reading oversized uploads
 	err := req.ParseMultipartForm(1 << 26)
@@ -83,7 +95,7 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 	var tags TagSet
 	badtags := tags.FillFromString(req.FormValue("tags"))
 
-	id, err := AddFile(dbctx, f, tags)
+	id, err := AddFile(req.Context(), f, tags)
 	if err != nil {
 		log.Print(err.Error())
 		http.Error(res, "Database Error", 500)
@@ -95,13 +107,13 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 			http.Error(res, "", 500)
 			return
 		}
-		SetInSessionDB(dbctx, sessionId, ClarifySession{ResourceId: id, FailedAddTags: badtags})
+		SetInSessionDB(req.Context(), sessionId, ClarifySession{ResourceId: id, FailedAddTags: badtags})
 
-		res.Header().Add("location", baseUrl+"/site/edit?session="+sessionId)
+		res.Header().Add("location", config.UrlBase+"/site/edit?session="+sessionId)
 		res.WriteHeader(303)
 		return
 	}
-	res.Header().Add("location", baseUrl+"/site/edit?id="+id)
+	res.Header().Add("location", config.UrlBase+"/site/edit?id="+id)
 	res.WriteHeader(303)
 }
 
@@ -128,6 +140,7 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(405)
 		return
 	}
+	config := req.Context().Value(ctxkeyConfig(0)).(Config)
 	// 1024 megabytes
 	// consider using maltipart reader to avoid reading oversized uploads
 	err := req.ParseMultipartForm(1 << 30)
@@ -152,14 +165,14 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 			continue // safety measure TODO figure this out
 		}
 		defer f.Close()
-		_, err = AddFile(dbctx, f, tags)
+		_, err = AddFile(req.Context(), f, tags)
 		if err != nil {
 			log.Println("failed to write file to database", err)
 			continue // TODO there should be some failure mode here
 		}
 	}
 
-	res.Header().Add("location", baseUrl+"/site/view")
+	res.Header().Add("location", config.UrlBase+"/site/view")
 	res.WriteHeader(303)
 }
 
@@ -216,7 +229,7 @@ func editreqLogic(req *http.Request) (ClarifySession, error) {
 		return ClarifySession{}, EMPTY_FORM
 	}
 
-	if err := ChangeTags(dbctx, addtags, deltags, session.ResourceId); err != nil {
+	if err := ChangeTags(req.Context(), addtags, deltags, session.ResourceId); err != nil {
 		err = errorWithContext{err, "database failure on changetags"}
 		return ClarifySession{}, err
 	}
@@ -236,7 +249,7 @@ func editPage(res http.ResponseWriter, req *http.Request) {
 	}
 	var editSession ClarifySession
 	if sessionId != "" {
-		_editSession, err := GetFromSessionDB(dbctx, sessionId)
+		_editSession, err := GetFromSessionDB(req.Context(), sessionId)
 		if err != nil {
 			http.Error(res, "Invalid session", 400)
 			return
@@ -253,7 +266,7 @@ func editPage(res http.ResponseWriter, req *http.Request) {
 		id = editSession.ResourceId
 	}
 	if req.Method == "GET" {
-		rsrc, err := GetFile(dbctx, id)
+		rsrc, err := GetFile(req.Context(), id)
 		if err != nil {
 			http.Error(res, "Database error", 500)
 			return
@@ -281,6 +294,8 @@ func editPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	config := req.Context().Value(ctxkeyConfig(0)).(Config)
+
 	session, err := editreqLogic(req)
 	if err == nil {
 		goto editpage_logic_noerr
@@ -301,20 +316,21 @@ editpage_logic_noerr:
 			http.Error(res, "", 500)
 			return
 		}
-		RemoveFromSessionDB(dbctx, sessionId)
-		SetInSessionDB(dbctx, newSessionId, ClarifySession{ResourceId: id, FailedAddTags: session.FailedAddTags, FailedDelTags: session.FailedDelTags})
+		RemoveFromSessionDB(req.Context(), sessionId)
+		SetInSessionDB(req.Context(), newSessionId, ClarifySession{ResourceId: id, FailedAddTags: session.FailedAddTags, FailedDelTags: session.FailedDelTags})
 
-		res.Header().Add("location", baseUrl+"/site/edit?session="+newSessionId)
+		res.Header().Add("location", config.UrlBase+"/site/edit?session="+newSessionId)
 		res.WriteHeader(303)
 		return
 	}
 
-	res.Header().Add("location", baseUrl+"/site/edit?id="+id)
+	res.Header().Add("location", config.UrlBase+"/site/edit?id="+id)
 	res.WriteHeader(303)
 	return
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
+	config := req.Context().Value(ctxkeyConfig(0)).(Config)
 	if req.Method == "POST" {
 		_, err := editreqLogic(req)
 		if err != nil {
@@ -322,7 +338,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 			res.WriteHeader(500)
 			return
 		}
-		res.Header().Add("location", baseUrl+req.URL.RequestURI())
+		res.Header().Add("location", config.UrlBase+req.URL.RequestURI())
 		res.WriteHeader(303)
 		return
 	}
@@ -391,7 +407,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "exceed list beginning", 400)
 		return
 	}
-	rsrc, err := TagQuery(dbctx, intag, extag, exmode, index-1)
+	rsrc, err := TagQuery(req.Context(), intag, extag, exmode, index-1)
 	if err == NO_RESULT {
 		if index == 1 {
 			http.Error(res, "no result", 400)
@@ -418,8 +434,8 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 				Title: "Viewing " + rsrc.Id,
 			},
 			rsrc,
-			baseUrl + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
-			baseUrl + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
+			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
+			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
 		},
 	)
 	if err != nil {
@@ -435,29 +451,47 @@ func debugMiddleWare(prefix string, next http.Handler) http.Handler {
 	})
 }
 
+func addContext(ctx context.Context, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		next.ServeHTTP(res, req.WithContext(ctx))
+	})
+}
+
 func main() {
 	// Declare limited flags
-	var cleanupFlag = flag.Bool("c", false, "if the database should be cleaned on startup")
+	var (
+		cleanupFlag    = flag.Bool("clean", false, "If the database should be cleaned on startup.")
+		configPathFlag = flag.String("config", "ftag.config.json", "The location of the config file.")
+	)
 
 	// Parse flags
 	flag.Parse()
 
-	baseUrl = *baseUrlFlag
+	// Setup Context
+	var ctx = context.Background()
+
+	// Parse Config
+	bts, err := os.ReadFile(*configPathFlag)
+	if err != nil {
+		log.Fatal("failed to read config:", err)
+	}
+	var config Config
+	json.Unmarshal(bts, &config)
+	ctx = context.WithValue(ctx, ctxkeyConfig(0), config)
 
 	// Load Templates
-	templates = template.Must(template.New("").Funcs(map[string]any{"hasPrefix": strings.HasPrefix, "getBaseUrl": func() string { return baseUrl }}).ParseGlob("./templates/*.gohtml"))
+	templates = template.Must(template.New("").Funcs(map[string]any{"hasPrefix": strings.HasPrefix, "getBaseUrl": func() string { return config.UrlBase }}).ParseGlob("./templates/*.gohtml"))
 
 	// Load database connection
 	var dbclose func()
-	var err error
-	dbctx, dbclose, err = ConnectDatabases()
+	ctx, dbclose, err = ConnectDatabases(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer dbclose()
 
 	if *cleanupFlag {
-		err := CleanDBs(dbctx)
+		err := CleanDBs(ctx)
 		if err != nil {
 			log.Println("Failed to clean up dbs", err)
 		} else {
@@ -478,5 +512,5 @@ func main() {
 	server.HandleFunc("/site/edit", editPage)
 	server.HandleFunc("/site/view", viewPage)
 
-	log.Fatal(http.ListenAndServe(":8080", http.StripPrefix(baseUrl, server)))
+	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, http.StripPrefix(config.UrlBase, server))))
 }

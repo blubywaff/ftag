@@ -1,4 +1,4 @@
 npx tailwindcss -i web/style.css -o dist/style.css
 gofmt -w *.go
-go build .
+CGO_ENABLED=0 go build .
 cp -r web/scripts dist/scripts
