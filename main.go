@@ -538,12 +538,7 @@ func main() {
 	defer dbclose()
 
 	if *cleanupFlag {
-		err := CleanDBs(ctx)
-		if err != nil {
-			log.Println("Failed to clean up dbs", err)
-		} else {
-			log.Println("Cleaned databases")
-		}
+		log.Fatal("Feature Not Supported")
 	}
 
 	server := http.NewServeMux()
