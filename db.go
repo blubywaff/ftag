@@ -83,11 +83,22 @@ func AddFile(ctx context.Context, f io.Reader, tags TagSet) (string, error) {
 	}
 
 	// Add tags
-	var batch pgx.Batch
+	var ids []string
 	for i := 0; i < tags.Len(); i++ {
-		batch.Queue("INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name IN $2) AS ttt;", id, tags.inner)
+		uuid, err := GenUUID()
+		if err != nil {
+			return "", err
+		}
+		ids = append(ids, uuid)
 	}
-	tx.SendBatch(ctx, &batch)
+	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, tags.inner)
+	if err != nil {
+		return "", errorWithContext{err, "tx failed to add tags"}
+	}
+	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt;", id, tags.inner)
+	if err != nil {
+		return "", errorWithContext{err, "tx failed to add tag connects"}
+	}
 	tx.Commit(ctx)
 	return id, nil
 }
@@ -178,6 +189,20 @@ func ChangeTags(ctx context.Context, addtags TagSet, deltags TagSet, id string) 
 		log.Print("ChangeTags Delete issue ", err)
 		return err
 	}
+	// Add tags
+	var ids []string
+	for i := 0; i < addtags.Len(); i++ {
+		uuid, err := GenUUID()
+		if err != nil {
+			return err
+		}
+		ids = append(ids, uuid)
+	}
+	// Add Tag Connects
+	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, addtags.inner)
+	if err != nil {
+		return errorWithContext{err, "tx failed to add tags"}
+	}
 	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt ON CONFLICT DO NOTHING;", id, addtags.inner)
 	if err != nil {
 		log.Print("ChangeTags insert issue", err)
@@ -265,6 +290,24 @@ func TagQuery(ctx context.Context, includes, excludes TagSet, excludeMode string
 		return Resource{}, errorWithContext{err, "TagQuery id scan issue"}
 	}
 	return GetFile(ctx, id)
+}
+
+func GetBytes(ctx context.Context, id string) ([]byte, error) {
+	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
+	tx, err := dbpool.Begin(ctx)
+	if err != nil {
+		return nil, errorWithContext{err, "GetBytes tx err"}
+	}
+	// Transaction should always be ended somehow
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, "SELECT data FROM Resource WHERE id = $1::uuid", id)
+	var bts []byte
+	err = row.Scan(&bts)
+	if err != nil {
+		return nil, errorWithContext{err, "GetBytes could not scan row"}
+	}
+	return bts, nil
 }
 
 // if the error return is nil, the caller must call returned callback to close the database connection

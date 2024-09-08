@@ -314,7 +314,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method == "POST" {
 		_, err := editreqLogic(req)
 		if err != nil {
-			err = errorWithContext{err, "failure of editreqlogic for view page"}
+			log.Print(errorWithContext{err, "failure of editreqlogic for view page"})
 			res.WriteHeader(500)
 			return
 		}
@@ -469,6 +469,17 @@ func settingsPage(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(303)
 }
 
+func servefile(res http.ResponseWriter, req *http.Request) {
+	id := req.URL.Path[len("/files/"):]
+	bts, err := GetBytes(req.Context(), id)
+	if err != nil {
+		http.Error(res, "Server error", 500)
+		return
+	}
+	res.Write(bts)
+	return
+}
+
 func debugMiddleWare(prefix string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		log.Println(prefix + " req url: " + req.URL.String())
@@ -544,11 +555,10 @@ func main() {
 	server := http.NewServeMux()
 
 	statfs := http.FileServer(http.Dir("./dist"))
-	filefs := http.FileServer(http.Dir("./files"))
 
 	server.HandleFunc("/", landingPage)
 	server.Handle("/public/", http.StripPrefix("/public/", statfs))
-	server.Handle("/files/", http.StripPrefix("/files/", filefs))
+	server.HandleFunc("/files/", servefile)
 	server.HandleFunc("/site/upload", uploadPage)
 	server.HandleFunc("/site/upload/many", multiuploadPage)
 	server.HandleFunc("/site/edit", editPage)
