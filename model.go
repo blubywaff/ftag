@@ -166,12 +166,6 @@ type PageMeta struct {
 	Title string
 }
 
-type ClarifySession struct {
-	ResourceId    string
-	FailedAddTags []string
-	FailedDelTags []string
-}
-
 type UserSettings_View struct {
 	DefaultExcludes TagSet
 	// valid values are "edit", "view", or "none"
