@@ -1,44 +1,5 @@
 <!DOCTYPE html>
 
-<html lang="en">
-    {{template "stdhead" .PageMeta }}
-    <body class="bg-gray-950 text-gray-50">
-        <div class="flex flex-col h-screen w-full">
-            <p>Editing {{.Resource.Id}}</p>
-            <div class="p-1">
-                <p class="font-bold">Tags</p>
-                {{range .Resource.Tags}}
-                    <p class="py-1 px-2 rounded-full bg-gray-300 text-gray-800 inline-block mb-2 text-center">{{.}}</p>
-                {{end}}
-            </div>
-            {{ if .Session.FailedAddTags }}
-            <div class="w-full flex justify-center">
-                <div class="max-w-md w-full p-3 bg-red-600 rounded-2xl mb-2">
-                    <p class="font-bold mb-1">Invalid Adds</p>
-                    {{ range .Session.FailedAddTags }}
-                    <p class="py-1 px-2 rounded-full bg-gray-300 text-gray-800 inline-block mb-2 text-center">{{.}}</p>
-                    {{end}}
-                </div>
-            </div>
-            {{end}}
-            {{ if .Session.FailedDelTags }}
-            <div class="w-full flex justify-center">
-                <div class="max-w-md w-full p-3 bg-red-600 rounded-2xl mb-2">
-                    <p class="font-bold mb-1">Invalid Removes</p>
-                    {{ range .Session.FailedDelTags }}
-                    <p class="py-1 px-2 rounded-full bg-gray-300 text-gray-800 inline-block mb-2 text-center">{{.}}</p>
-                    {{end}}
-                </div>
-            </div>
-            {{end}}
-            <div class="w-full flex justify-center">
-                {{template "editform" .Session.ResourceId}}
-            </div>
-            {{template "preview" .Resource }}
-        </div>
-    </body>
-</html>
-
 {{define "editform"}}
     <form method="post" enctype="multipart/form-data" class="max-w-md w-full p-6 bg-gray-600 rounded-2xl mb-6">
         <input hidden name="resourceid" value="{{.}}">

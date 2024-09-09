@@ -76,13 +76,13 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 	badtags := tags.FillFromString(req.FormValue("tags"))
 	log.Print("upload bad tags ", badtags)
 
-	id, err := AddFile(req.Context(), f, tags)
+	_, err = AddFile(req.Context(), f, tags)
 	if err != nil {
 		log.Print(err.Error())
 		http.Error(res, "Database Error", 500)
 		return
 	}
-	res.Header().Add("location", config.UrlBase+"/site/view?id="+id)
+	res.Header().Add("location", config.UrlBase+"/site/view")
 	res.WriteHeader(303)
 }
 
