@@ -153,14 +153,12 @@ func (ts *TagSet) remove(str string) error {
 	return nil
 }
 
-type Config_Neo4j struct {
-	Username string
-	Password string
-	Url      string
+type Config_SQL struct {
+	Url string
 }
 
 type Config struct {
-	Neo4j   Config_Neo4j
+	SQL     Config_SQL
 	UrlBase string
 }
 
@@ -184,8 +182,8 @@ type UserSettings struct {
 	View UserSettings_View
 }
 
-/// Will always leave the settings in a good state
-/// If s is invalid, returns error and sets to default settings
+// / Will always leave the settings in a good state
+// / If s is invalid, returns error and sets to default settings
 func (ust *UserSettings) FromCookieString(s string) error {
 	src := []byte(s)
 	bts := make([]byte, base64.StdEncoding.DecodedLen(len(src)))
