@@ -7,7 +7,6 @@
     <div class="flex flex-col h-screen">
         <div class="bg-gray-500 flex flex-row gap-x-4 justify-around">
             <a href="{{.PrevLink}}" class="">Prev</a>
-            <a href="{{getBaseUrl}}/site/edit?id={{.Resource.Id}}" class="">Edit</a>
             <a href="{{.NextLink}}" class="">Next</a>
         </div>
         <details {{if not (eq .UserSettings.View.TagVisibility "none")}}open{{end}} class="">

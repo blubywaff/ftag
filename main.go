@@ -74,26 +74,15 @@ func uploadPage(res http.ResponseWriter, req *http.Request) {
 
 	var tags TagSet
 	badtags := tags.FillFromString(req.FormValue("tags"))
+	log.Print("upload bad tags ", badtags)
 
-	id, err := AddFile(req.Context(), f, tags)
+	_, err = AddFile(req.Context(), f, tags)
 	if err != nil {
 		log.Print(err.Error())
 		http.Error(res, "Database Error", 500)
 		return
 	}
-	if len(badtags) != 0 {
-		sessionId, err := GenUUID()
-		if err != nil {
-			http.Error(res, "", 500)
-			return
-		}
-		SetInSessionDB(req.Context(), sessionId, ClarifySession{ResourceId: id, FailedAddTags: badtags})
-
-		res.Header().Add("location", config.UrlBase+"/site/edit?session="+sessionId)
-		res.WriteHeader(303)
-		return
-	}
-	res.Header().Add("location", config.UrlBase+"/site/edit?id="+id)
+	res.Header().Add("location", config.UrlBase+"/site/view")
 	res.WriteHeader(303)
 }
 
@@ -156,15 +145,16 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(303)
 }
 
-func editreqLogic(req *http.Request) (ClarifySession, error) {
+func editreqLogic(req *http.Request) (string, []string, []string, error) {
 	formReader, err := req.MultipartReader()
 	if err != nil {
 		err = errorWithContext{err, "could not open multipart reader"}
 		log.Println(err)
-		return ClarifySession{}, err
+		return "", nil, nil, err
 	}
 	var addtags, deltags TagSet
-	var session ClarifySession
+	var failedAdd, failedDel []string
+	var resourceId string
 	for {
 		part, err := formReader.NextPart()
 		if err == io.EOF {
@@ -172,7 +162,7 @@ func editreqLogic(req *http.Request) (ClarifySession, error) {
 		}
 		if err != nil {
 			err = errorWithContext{err, "failed on form part"}
-			return ClarifySession{}, err
+			return "", nil, nil, err
 		}
 		switch part.FormName() {
 		case "addtags":
@@ -181,138 +171,45 @@ func editreqLogic(req *http.Request) (ClarifySession, error) {
 			if buf.Len() == 0 {
 				continue
 			}
-			session.FailedAddTags = addtags.FillFromString(buf.String())
+			failedAdd = addtags.FillFromString(buf.String())
 		case "deltags":
 			buf := new(bytes.Buffer)
 			buf.ReadFrom(part)
 			if buf.Len() == 0 {
 				continue
 			}
-			session.FailedDelTags = deltags.FillFromString(buf.String())
+			failedDel = deltags.FillFromString(buf.String())
 		case "resourceid":
 			buf := new(bytes.Buffer)
 			buf.ReadFrom(part)
 			if buf.Len() == 0 {
 				continue
 			}
-			session.ResourceId = buf.String()
+			resourceId = buf.String()
 		default:
-			return ClarifySession{}, INVALID_FORM_FIELD
+			return "", nil, nil, INVALID_FORM_FIELD
 		}
 	}
 
-	if session.ResourceId == "" {
-		return ClarifySession{}, MISSING_FORM_REQUIREMENT
+	if resourceId == "" {
+		return "", nil, nil, MISSING_FORM_REQUIREMENT
 	}
 
-	if addtags.Len() == 0 && deltags.Len() == 0 && len(session.FailedAddTags) == 0 && len(session.FailedDelTags) == 0 {
-		return ClarifySession{}, EMPTY_FORM
+	if addtags.Len() == 0 && deltags.Len() == 0 && len(failedAdd) == 0 && len(failedDel) == 0 {
+		return resourceId, nil, nil, EMPTY_FORM
 	}
 
-	if err := ChangeTags(req.Context(), addtags, deltags, session.ResourceId); err != nil {
+	if err := ChangeTags(req.Context(), addtags, deltags, resourceId); err != nil {
 		err = errorWithContext{err, "database failure on changetags"}
-		return ClarifySession{}, err
+		return resourceId, failedAdd, failedDel, err
 	}
-	return session, nil
-}
-
-func editPage(res http.ResponseWriter, req *http.Request) {
-	if req.Method != "GET" && req.Method != "POST" {
-		res.WriteHeader(405)
-		return
-	}
-	id := req.URL.Query().Get("id")
-	sessionId := req.URL.Query().Get("session")
-	if id == "" && sessionId == "" {
-		http.Error(res, "Must have non-empty id or session", 400)
-		return
-	}
-	var editSession ClarifySession
-	if sessionId != "" {
-		_editSession, err := GetFromSessionDB(req.Context(), sessionId)
-		if err != nil {
-			http.Error(res, "Invalid session", 400)
-			return
-		}
-		var ok bool
-		editSession, ok = _editSession.(ClarifySession)
-		if !ok {
-			http.Error(res, "Invalid edit session", 400)
-			return
-		}
-		if id != "" && id != editSession.ResourceId {
-			http.Error(res, "session and fallback id conflict", 400)
-		}
-		id = editSession.ResourceId
-	}
-	if req.Method == "GET" {
-		rsrc, err := GetFile(req.Context(), id)
-		if err != nil {
-			http.Error(res, "Database error", 500)
-			return
-		}
-		err = templates.ExecuteTemplate(
-			res,
-			"edit.gohtml",
-			struct {
-				PageMeta PageMeta
-				Resource Resource
-				Session  ClarifySession
-			}{
-				PageMeta{
-					"Editing " + id,
-				},
-				rsrc,
-				editSession,
-			},
-		)
-		if err != nil {
-			res.WriteHeader(500)
-			log.Println("error with edit.gohtml", err)
-			return
-		}
-		return
-	}
-
-	config := req.Context().Value(ctxkeyConfig(0)).(Config)
-
-	session, err := editreqLogic(req)
-	if err == nil {
-		goto editpage_logic_noerr
-	}
-	if err == EMPTY_FORM {
-		http.Error(res, "empty form", 400)
-		return
-	}
-	if err == INVALID_FORM_FIELD {
-		http.Error(res, "invalid field in form", 400)
-		return
-	}
-
-editpage_logic_noerr:
-	if len(session.FailedAddTags) != 0 || len(session.FailedDelTags) != 0 {
-		newSessionId, err := GenUUID()
-		if err != nil {
-			http.Error(res, "", 500)
-			return
-		}
-		RemoveFromSessionDB(req.Context(), sessionId)
-		SetInSessionDB(req.Context(), newSessionId, ClarifySession{ResourceId: id, FailedAddTags: session.FailedAddTags, FailedDelTags: session.FailedDelTags})
-
-		res.Header().Add("location", config.UrlBase+"/site/edit?session="+newSessionId)
-		res.WriteHeader(303)
-		return
-	}
-
-	res.Header().Add("location", config.UrlBase+"/site/edit?id="+id)
-	res.WriteHeader(303)
-	return
+	return resourceId, failedAdd, failedDel, nil
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
 	config := req.Context().Value(ctxkeyConfig(0)).(Config)
 	if req.Method == "POST" {
-		_, err := editreqLogic(req)
+		_, _, _, err := editreqLogic(req)
 		if err != nil {
 			log.Print(errorWithContext{err, "failure of editreqlogic for view page"})
 			res.WriteHeader(500)
@@ -561,7 +458,6 @@ func main() {
 	server.HandleFunc("/files/", servefile)
 	server.HandleFunc("/site/upload", uploadPage)
 	server.HandleFunc("/site/upload/many", multiuploadPage)
-	server.HandleFunc("/site/edit", editPage)
 	server.HandleFunc("/site/view", viewPage)
 	server.HandleFunc("/site/settings", settingsPage)
 
