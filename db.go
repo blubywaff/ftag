@@ -18,27 +18,6 @@ import (
 var NO_RESULT error = errors.New("database no result")
 
 type ctxkeyDriver int
-type ctxkeyMemDB int
-
-type MemDB map[string]any
-
-func SetInSessionDB(ctx context.Context, id string, record any) error {
-	ctx.Value(ctxkeyMemDB(0)).(MemDB)[id] = record
-	return nil
-}
-
-func GetFromSessionDB(ctx context.Context, id string) (any, error) {
-	record, ok := ctx.Value(ctxkeyMemDB(0)).(MemDB)[id]
-	if !ok {
-		return nil, errors.New("does not exist")
-	}
-	return record, nil
-}
-
-func RemoveFromSessionDB(ctx context.Context, id string) error {
-	delete(ctx.Value(ctxkeyMemDB(0)).(MemDB), id)
-	return nil
-}
 
 func GenUUID() (string, error) {
 	rid, err := uuid.NewRandom()
