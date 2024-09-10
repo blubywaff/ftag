@@ -32,60 +32,6 @@ func landingPage(res http.ResponseWriter, req *http.Request) {
 	res.Write([]byte("You have reached blubywaff.com at " + time.Now().UTC().Format("2006-01-02 15:04:05") + "."))
 }
 
-func uploadPage(res http.ResponseWriter, req *http.Request) {
-	if req.Method == "GET" {
-		err := templates.ExecuteTemplate(
-			res,
-			"upload.gohtml",
-			struct {
-				PageMeta PageMeta
-			}{
-				PageMeta{
-					"Upload",
-				},
-			},
-		)
-		if err != nil {
-			res.WriteHeader(500)
-			log.Println("error with upload.gohtml")
-		}
-		return
-	}
-	if req.Method != "POST" {
-		res.WriteHeader(405)
-		return
-	}
-	config := req.Context().Value(ctxkeyConfig(0)).(Config)
-	// 64 megabytes
-	// consider using maltipart reader to avoid reading oversized uploads
-	err := req.ParseMultipartForm(1 << 26)
-	if err != nil {
-		res.WriteHeader(500)
-		log.Println("error with multipart form upload")
-		return
-	}
-	f, _, err := req.FormFile("uploadfile")
-	if err != nil {
-		res.WriteHeader(500)
-		log.Println("could not read upload " + err.Error())
-		return
-	}
-	defer f.Close()
-
-	var tags TagSet
-	badtags := tags.FillFromString(req.FormValue("tags"))
-	log.Print("upload bad tags ", badtags)
-
-	_, err = AddFile(req.Context(), f, tags)
-	if err != nil {
-		log.Print(err.Error())
-		http.Error(res, "Database Error", 500)
-		return
-	}
-	res.Header().Add("location", config.UrlBase+"/site/view")
-	res.WriteHeader(303)
-}
-
 func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method == "GET" {
 		err := templates.ExecuteTemplate(
@@ -456,8 +402,7 @@ func main() {
 	server.HandleFunc("/", landingPage)
 	server.Handle("/public/", http.StripPrefix("/public/", statfs))
 	server.HandleFunc("/files/", servefile)
-	server.HandleFunc("/site/upload", uploadPage)
-	server.HandleFunc("/site/upload/many", multiuploadPage)
+	server.HandleFunc("/site/upload", multiuploadPage)
 	server.HandleFunc("/site/view", viewPage)
 	server.HandleFunc("/site/settings", settingsPage)
 
