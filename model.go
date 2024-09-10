@@ -12,16 +12,16 @@ type Resource struct {
 	Id        string
 	Mimetype  string
 	CreatedAt time.Time
-	Tags      []string
+	Tags      TagSet
 }
 
 type TagSet struct {
-	inner []string
+	Inner []string
 }
 
 func (ts *TagSet) String() string {
 	var sb strings.Builder
-	for i, t := range ts.inner {
+	for i, t := range ts.Inner {
 		if i != 0 {
 			sb.WriteString(",")
 		}
@@ -31,35 +31,35 @@ func (ts *TagSet) String() string {
 }
 
 func (ts *TagSet) MarshalJSON() ([]byte, error) {
-	return json.Marshal(ts.inner)
+	return json.Marshal(ts.Inner)
 }
 
 func (ts *TagSet) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &ts.inner)
+	return json.Unmarshal(data, &ts.Inner)
 }
 
 func (ts *TagSet) Duplicate() *TagSet {
-	du := TagSet{make([]string, len(ts.inner))}
-	copy(du.inner, ts.inner)
+	du := TagSet{make([]string, len(ts.Inner))}
+	copy(du.Inner, ts.Inner)
 	return &du
 }
 
 func (ts *TagSet) Union(rhs TagSet) *TagSet {
-	for _, t := range rhs.inner {
+	for _, t := range rhs.Inner {
 		ts.add(t)
 	}
 	return ts
 }
 
 func (ts *TagSet) Difference(rhs TagSet) *TagSet {
-	for _, t := range rhs.inner {
+	for _, t := range rhs.Inner {
 		ts.remove(t)
 	}
 	return ts
 }
 
 func (ts *TagSet) Len() int {
-	return len(ts.inner)
+	return len(ts.Inner)
 }
 
 // Returns tags that do not conform
@@ -107,13 +107,13 @@ func (ts *TagSet) Add(str string) error {
 // returns the index and whether the item was present
 // if item is not present, then the index is where the item would be if it were present
 func (ts *TagSet) index(str string) (int, bool) {
-	l, r := 0, len(ts.inner)
+	l, r := 0, len(ts.Inner)
 	for l != r {
 		m := (l + r) / 2
-		if ts.inner[m] == str {
+		if ts.Inner[m] == str {
 			return m, true
 		}
-		if str > ts.inner[m] {
+		if str > ts.Inner[m] {
 			l = m + 1
 		} else {
 			r = m
@@ -125,30 +125,30 @@ func (ts *TagSet) index(str string) (int, bool) {
 // adds a pre-checked tag string
 // returns error iff tag is already present
 func (ts *TagSet) add(str string) error {
-	if len(ts.inner) == 0 {
-		ts.inner = append(ts.inner, str)
+	if len(ts.Inner) == 0 {
+		ts.Inner = append(ts.Inner, str)
 		return nil
 	}
 	l, p := ts.index(str)
 	if p {
 		return errors.New("tag already present in set")
 	}
-	if l == len(ts.inner) {
-		ts.inner = append(ts.inner, str)
+	if l == len(ts.Inner) {
+		ts.Inner = append(ts.Inner, str)
 		return nil
 	}
-	ts.inner = append(ts.inner[:l+1], ts.inner[l:]...)
-	ts.inner[l] = str
+	ts.Inner = append(ts.Inner[:l+1], ts.Inner[l:]...)
+	ts.Inner[l] = str
 	return nil
 }
 
 // return error iff the item is not present
 func (ts *TagSet) remove(str string) error {
-	if len(ts.inner) == 0 {
+	if len(ts.Inner) == 0 {
 		return errors.New("tagset is empty, nothing to remove")
 	}
 	if l, p := ts.index(str); p {
-		ts.inner = append(ts.inner[:l], ts.inner[l+1:]...)
+		ts.Inner = append(ts.Inner[:l], ts.Inner[l+1:]...)
 	}
 	return nil
 }
