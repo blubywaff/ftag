@@ -70,11 +70,11 @@ func AddFile(ctx context.Context, f io.Reader, tags TagSet) (string, error) {
 		}
 		ids = append(ids, uuid)
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, tags.inner)
+	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, tags.Inner)
 	if err != nil {
 		return "", errorWithContext{err, "tx failed to add tags"}
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt;", id, tags.inner)
+	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt;", id, tags.Inner)
 	if err != nil {
 		return "", errorWithContext{err, "tx failed to add tag connects"}
 	}
@@ -121,7 +121,6 @@ func GetFile(ctx context.Context, id string) (Resource, error) {
 			echan <- errorWithContext{err, "getfile query issue"}
 			return
 		}
-		var tags []string
 		for rows.Next() {
 			var tag string
 			err = rows.Scan(&tag)
@@ -129,13 +128,12 @@ func GetFile(ctx context.Context, id string) (Resource, error) {
 				echan <- errorWithContext{err, "getfile scan issue"}
 				return
 			}
-			tags = append(tags, tag)
+			err = rsrc.Tags.Add(tag)
 		}
 		if rows.Err() != nil {
 			echan <- errorWithContext{err, "getfile rows issue"}
 			return
 		}
-		rsrc.Tags = tags
 		rchan <- rsrc
 		return
 	}()
@@ -163,7 +161,7 @@ func ChangeTags(ctx context.Context, addtags TagSet, deltags TagSet, id string) 
 	// Transaction should always be ended somehow
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Exec(ctx, "DELETE FROM TagOn WHERE resource_id = $1::uuid AND tag_id IN (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2));", id, deltags.inner)
+	_, err = tx.Exec(ctx, "DELETE FROM TagOn WHERE resource_id = $1::uuid AND tag_id IN (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2));", id, deltags.Inner)
 	if err != nil {
 		log.Print("ChangeTags Delete issue ", err)
 		return err
@@ -178,11 +176,11 @@ func ChangeTags(ctx context.Context, addtags TagSet, deltags TagSet, id string) 
 		ids = append(ids, uuid)
 	}
 	// Add Tag Connects
-	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, addtags.inner)
+	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, addtags.Inner)
 	if err != nil {
 		return errorWithContext{err, "tx failed to add tags"}
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt ON CONFLICT DO NOTHING;", id, addtags.inner)
+	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt ON CONFLICT DO NOTHING;", id, addtags.Inner)
 	if err != nil {
 		log.Print("ChangeTags insert issue", err)
 		return err
@@ -231,11 +229,11 @@ func TagQuery(ctx context.Context, includes, excludes TagSet, excludeMode string
 	var params []any
 	if includes.Len() > 0 {
 		qq += inc
-		params = append(params, includes.inner, includes.Len())
+		params = append(params, includes.Inner, includes.Len())
 	}
 	if excludes.Len() > 0 {
 		qq += exc
-		params = append(params, excludes.inner)
+		params = append(params, excludes.Inner)
 	}
 
 	wrap := `

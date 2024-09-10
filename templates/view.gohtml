@@ -14,7 +14,7 @@
                 <span class="font-bold">Tags</span>
             </summary>
             <div class="">
-                {{range .Resource.Tags}}
+                {{range .Resource.Tags.Inner}}
                     <p class="py-1 px-2 rounded-full bg-gray-300 text-gray-800 inline-block mb-2 text-center">{{.}}</p>
                 {{end}}
                 <details class="flex justify-center" {{if eq .UserSettings.View.TagVisibility "edit"}}open{{end}}>
