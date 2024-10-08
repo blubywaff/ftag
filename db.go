@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -189,84 +188,39 @@ func ChangeTags(ctx context.Context, addtags TagSet, deltags TagSet, id string) 
 	return nil
 }
 
-func TagQuery(ctx context.Context, includes, excludes TagSet, excludeMode string, index int) (Resource, error) {
+func TagQuery(ctx context.Context, query Query) ([]Resource, error) {
 	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
 	tx, err := dbpool.Begin(ctx)
 	if err != nil {
-		return Resource{}, errorWithContext{err, "TagQuery tx err"}
+		return nil, errorWithContext{err, "TagQuery tx err"}
 	}
 	// Transaction should always be ended somehow
 	defer tx.Rollback(ctx)
 
-	// core query parts
-	cte := `
-        WITH tt (id, upload, name) AS (
-            SELECT Resource.id, upload, Tag.name
-            FROM Resource
-            JOIN TagOn
-                ON TagOn.resource_id = Resource.id
-            JOIN Tag
-                ON Tag.id = TagOn.tag_id
-        )
-        SELECT tt.id, tt.upload
-        FROM tt
-    `
-	inc := `
-        WHERE tt.name = any ($%d)
-        GROUP BY tt.id, tt.upload
-        HAVING COUNT(tt.id) = $%d
-    `
-
-	exc := `
-        EXCEPT
-        SELECT tt.id, tt.upload
-        FROM tt
-        WHERE name = any ($%d)
-    `
-
-	// intermediary variable for query
-	qq := cte
-	var params []any
-	if includes.Len() > 0 {
-		qq += inc
-		params = append(params, includes.Inner, includes.Len())
-	}
-	if excludes.Len() > 0 {
-		qq += exc
-		params = append(params, excludes.Inner)
-	}
-
-	wrap := `
-        SELECT id
-        FROM (
-            SELECT DISTINCT id, upload
-            FROM ( %s )
-            ORDER BY upload DESC, id ASC
-            LIMIT 1
-            OFFSET $%%d
-        );
-    `
-	params = append(params, index)
-
-	nums := []any{}
-	for i := 1; i <= len(params); i++ {
-		nums = append(nums, i)
-	}
-	query := fmt.Sprintf(fmt.Sprintf(wrap, qq), nums...)
-	rows, err := tx.Query(ctx, query, params...)
+	querystr := `
+    SELECT tq.id as id, tq.upload as upload, tq.mime as mime, ARRAY_AGG(rt.name) as tags
+    FROM tagquery($1, $2, $3, $4) AS tq, rtags AS rt
+    WHERE tq.id = rt.id
+    GROUP BY tq.id, tq.upload, tq.mime
+    ;`
+	rows, err := tx.Query(ctx, querystr, query.Include.Inner, query.Exclude.Inner, query.Offset, query.Limit)
 	if err != nil {
-		return Resource{}, errorWithContext{err, "TagQuery query issue"}
+		return nil, errorWithContext{err, "TagQuery query issue"}
 	}
 	defer rows.Close()
-	var id string
-	if !rows.Next() {
-		return Resource{}, NO_RESULT
+
+	var final []Resource
+	for rows.Next() {
+		var rsrc Resource
+		var tags []string
+		err = rows.Scan(&rsrc.Id, &rsrc.CreatedAt, &rsrc.Mimetype, &tags)
+		if err != nil {
+			return nil, errorWithContext{err, "TagQuery rowscan issue"}
+		}
+		rsrc.Tags.fromSlice(tags)
+		final = append(final, rsrc)
 	}
-	err = rows.Scan(&id)
-	if err != nil {
-		return Resource{}, errorWithContext{err, "TagQuery id scan issue"}
-	}
-	return GetFile(ctx, id)
+	return final, nil
 }
 
 func GetBytes(ctx context.Context, id string) ([]byte, error) {

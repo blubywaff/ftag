@@ -153,6 +153,20 @@ func (ts *TagSet) remove(str string) error {
 	return nil
 }
 
+func (ts *TagSet) fromSlice(sstr []string) error {
+	// use insertion sort b/c a single set is not expected
+	// to have more than a couple dozen tags
+	for i := 1; i < len(sstr); i++ {
+		for j := i - 1; j > 0; j-- {
+			if sstr[j] < sstr[j+1] {
+				sstr[j], sstr[j+1] = sstr[j+1], sstr[j]
+			}
+		}
+	}
+	ts.Inner = sstr
+	return nil
+}
+
 type Config_SQL struct {
 	Url string
 }
@@ -225,4 +239,11 @@ var DefaultUserSettings UserSettings = UserSettings{
 		TagSet{},
 		"view",
 	},
+}
+
+type Query struct {
+	Include TagSet
+	Exclude TagSet
+	Offset  int
+	Limit   int
 }

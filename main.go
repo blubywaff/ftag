@@ -192,7 +192,6 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	var intag, extag TagSet
-	var exmode string
 	var index int
 	intagstr, ok := req.URL.Query()["intags"]
 	if !ok {
@@ -206,16 +205,6 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	extag.FillFromString(extagstr[0])
-	exmodestr, ok := req.URL.Query()["exmode"]
-	if !ok {
-		http.Error(res, "Missing exmode field", 400)
-		return
-	}
-	exmode = exmodestr[0]
-	if exmode != "or" && exmode != "and" {
-		http.Error(res, "Invalid exlude mode", 400)
-		return
-	}
 	numerstr, ok := req.URL.Query()["number"]
 	if !ok {
 		http.Error(res, "Missing number field", 400)
@@ -233,18 +222,19 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 	ust := req.Context().Value(ctxkeyUserSettings(0)).(UserSettings)
 	// Adds all user default exclusions that are not specifically included
 	extag.Union(*ust.View.DefaultExcludes.Duplicate().Difference(intag))
-	rsrc, err := TagQuery(req.Context(), intag, extag, exmode, index-1)
-	if err == NO_RESULT {
+	query := Query{Include: intag, Exclude: extag, Offset: index - 1, Limit: 1}
+	rsrcs, err := TagQuery(req.Context(), query)
+	if err != nil {
+		res.WriteHeader(500)
+		log.Println("err with viewPage db TagQuery", err)
+		return
+	}
+	if len(rsrcs) == 0 {
 		if index == 1 {
 			http.Error(res, "no result", 400)
 			return
 		}
 		http.Error(res, "exceed list end", 400)
-		return
-	}
-	if err != nil {
-		res.WriteHeader(500)
-		log.Println("err with viewPage db TagQuery", err)
 		return
 	}
 	err = templates.ExecuteTemplate(
@@ -258,11 +248,11 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 			UserSettings UserSettings
 		}{
 			PageMeta{
-				Title: "Viewing " + rsrc.Id,
+				Title: "Viewing " + rsrcs[0].Id,
 			},
-			rsrc,
-			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
-			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0] + "&exmode=" + exmode,
+			rsrcs[0],
+			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0],
+			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0],
 			ust,
 		},
 	)
