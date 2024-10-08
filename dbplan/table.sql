@@ -36,9 +36,9 @@ BEGIN
         SELECT rtags.id, rtags.upload, rtags.mime
         FROM rtags
         WHERE rtags.name = any (includes)
-        OR ARRAY_LENGTH(includes, 1) = 0
+        OR ARRAY_LENGTH(includes, 1) IS NULL
         GROUP BY rtags.id, rtags.upload, rtags.mime
-        HAVING COUNT(rtags.name) = ARRAY_LENGTH(includes, 1)
+        HAVING COUNT(rtags.name) = COALESCE(ARRAY_LENGTH(includes, 1), COUNT(rtags.name))
         EXCEPT
         SELECT rtags.id, rtags.upload, rtags.mime
         FROM rtags

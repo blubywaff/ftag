@@ -3,12 +3,14 @@
 {{template "stdhead" .PageMeta}}
 
 <body class="bg-gray-950 text-gray-50">
-    {{ if .Resource }}
+    {{ if ne .Render "empty" }}
     <div class="flex flex-col h-screen">
+        {{ if ne .Render "id" }}
         <div class="bg-gray-500 flex flex-row gap-x-4 justify-around">
             <a href="{{.PrevLink}}" class="">Prev</a>
             <a href="{{.NextLink}}" class="">Next</a>
         </div>
+        {{ end }}
         <details {{if not (eq .UserSettings.View.TagVisibility "none")}}open{{end}} class="">
             <summary class="">
                 <span class="font-bold">Tags</span>

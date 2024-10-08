@@ -174,15 +174,42 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 			res,
 			"view.gohtml",
 			struct {
+				Render   string
 				PageMeta PageMeta
 				Resource interface{}
-				Index    string
 			}{
+				"empty",
 				PageMeta{
 					Title: "Viewer",
 				},
 				nil,
-				"",
+			},
+		)
+		if err != nil {
+			res.WriteHeader(500)
+			log.Println("error with view.gohtml", err)
+		}
+		return
+	}
+	ust := req.Context().Value(ctxkeyUserSettings(0)).(UserSettings)
+	idstr, ok := req.URL.Query()["id"]
+	if ok {
+		rsrc, err := GetFile(req.Context(), idstr[0])
+		err = templates.ExecuteTemplate(
+			res,
+			"view.gohtml",
+			struct {
+				Render       string
+				PageMeta     PageMeta
+				Resource     interface{}
+				UserSettings UserSettings
+			}{
+				"id",
+				PageMeta{
+					Title: "Viewer",
+				},
+				rsrc,
+				ust,
 			},
 		)
 		if err != nil {
@@ -219,7 +246,6 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "exceed list beginning", 400)
 		return
 	}
-	ust := req.Context().Value(ctxkeyUserSettings(0)).(UserSettings)
 	// Adds all user default exclusions that are not specifically included
 	extag.Union(*ust.View.DefaultExcludes.Duplicate().Difference(intag))
 	query := Query{Include: intag, Exclude: extag, Offset: index - 1, Limit: 1}
@@ -241,12 +267,14 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		res,
 		"view.gohtml",
 		struct {
+			Render       string
 			PageMeta     PageMeta
 			Resource     Resource
 			PrevLink     string
 			NextLink     string
 			UserSettings UserSettings
 		}{
+			"query",
 			PageMeta{
 				Title: "Viewing " + rsrcs[0].Id,
 			},
