@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"context"
@@ -9,6 +9,9 @@ import (
 
 	"errors"
 
+	"github.com/blubywaff/ftag/internal/config"
+	"github.com/blubywaff/ftag/internal/error"
+	"github.com/blubywaff/ftag/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,7 +31,7 @@ func GenUUID() (string, error) {
 }
 
 // returns id of the resource if created (err == nil)
-func AddFile(ctx context.Context, f io.Reader, tags TagSet) (string, error) {
+func AddFile(ctx context.Context, f io.Reader, tags model.TagSet) (string, error) {
 	// Generate id, mimetype
 	var bts = make([]byte, 1<<25) // 32 MB
 	nRead, err := f.Read(bts)
@@ -57,7 +60,7 @@ func AddFile(ctx context.Context, f io.Reader, tags TagSet) (string, error) {
 	// Create resource
 	_, err = tx.Exec(ctx, "INSERT INTO Resource (id, mime, upload, data) VALUES ($1::uuid, $2, $3, $4);", id, mimetype, time.Now().UTC(), bts)
 	if err != nil {
-		return "", errorWithContext{err, "database failed for resource creation"}
+		return "", _error.ErrorWithContext{Original: err, Message: "database failed for resource creation"}
 	}
 
 	// Add tags
@@ -71,21 +74,21 @@ func AddFile(ctx context.Context, f io.Reader, tags TagSet) (string, error) {
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, tags.Inner)
 	if err != nil {
-		return "", errorWithContext{err, "tx failed to add tags"}
+		return "", _error.ErrorWithContext{Original: err, Message: "tx failed to add tags"}
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt;", id, tags.Inner)
 	if err != nil {
-		return "", errorWithContext{err, "tx failed to add tag connects"}
+		return "", _error.ErrorWithContext{Original: err, Message: "tx failed to add tag connects"}
 	}
 	tx.Commit(ctx)
 	return id, nil
 }
 
-func GetFile(ctx context.Context, id string) (Resource, error) {
+func GetFile(ctx context.Context, id string) (model.Resource, error) {
 	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
 	tx, err := dbpool.Begin(ctx)
 	if err != nil {
-		return Resource{}, err
+		return model.Resource{}, err
 	}
 	// Transaction should always be ended somehow
 	defer tx.Rollback(ctx)
@@ -96,48 +99,48 @@ func GetFile(ctx context.Context, id string) (Resource, error) {
 	br := tx.SendBatch(ctx, &batch)
 
 	// exactly one of these will be written to
-	rchan := make(chan Resource)
+	rchan := make(chan model.Resource)
 	echan := make(chan error)
 	go func() {
 		rows, err := br.Query()
 		if err != nil {
-			echan <- errorWithContext{err, "getfile query issue"}
+			echan <- _error.ErrorWithContext{Original: err, Message: "getfile query issue"}
 			return
 		}
 		if !rows.Next() {
 			echan <- rows.Err()
 			return
 		}
-		var rsrc Resource
+		var rsrc model.Resource
 		err = rows.Scan(&rsrc.Id, &rsrc.Mimetype, &rsrc.CreatedAt)
 		if err != nil {
-			echan <- errorWithContext{err, "getfile tag scan issue"}
+			echan <- _error.ErrorWithContext{Original: err, Message: "getfile tag scan issue"}
 			return
 		}
 		rows.Close()
 		rows, err = br.Query()
 		if err != nil {
-			echan <- errorWithContext{err, "getfile query issue"}
+			echan <- _error.ErrorWithContext{Original: err, Message: "getfile query issue"}
 			return
 		}
 		for rows.Next() {
 			var tag string
 			err = rows.Scan(&tag)
 			if err != nil {
-				echan <- errorWithContext{err, "getfile scan issue"}
+				echan <- _error.ErrorWithContext{Original: err, Message: "getfile scan issue"}
 				return
 			}
 			err = rsrc.Tags.Add(tag)
 		}
 		if rows.Err() != nil {
-			echan <- errorWithContext{err, "getfile rows issue"}
+			echan <- _error.ErrorWithContext{Original: err, Message: "getfile rows issue"}
 			return
 		}
 		rchan <- rsrc
 		return
 	}()
 
-	var rsrc Resource
+	var rsrc model.Resource
 
 	select {
 	case err = <-echan:
@@ -151,7 +154,7 @@ func GetFile(ctx context.Context, id string) (Resource, error) {
 	}
 }
 
-func ChangeTags(ctx context.Context, addtags TagSet, deltags TagSet, id string) error {
+func ChangeTags(ctx context.Context, addtags model.TagSet, deltags model.TagSet, id string) error {
 	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
 	tx, err := dbpool.Begin(ctx)
 	if err != nil {
@@ -177,7 +180,7 @@ func ChangeTags(ctx context.Context, addtags TagSet, deltags TagSet, id string) 
 	// Add Tag Connects
 	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, addtags.Inner)
 	if err != nil {
-		return errorWithContext{err, "tx failed to add tags"}
+		return _error.ErrorWithContext{Original: err, Message: "tx failed to add tags"}
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt ON CONFLICT DO NOTHING;", id, addtags.Inner)
 	if err != nil {
@@ -188,11 +191,11 @@ func ChangeTags(ctx context.Context, addtags TagSet, deltags TagSet, id string) 
 	return nil
 }
 
-func TagQuery(ctx context.Context, query Query) ([]Resource, error) {
+func TagQuery(ctx context.Context, query model.Query) ([]model.Resource, error) {
 	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
 	tx, err := dbpool.Begin(ctx)
 	if err != nil {
-		return nil, errorWithContext{err, "TagQuery tx err"}
+		return nil, _error.ErrorWithContext{Original: err, Message: "TagQuery tx err"}
 	}
 	// Transaction should always be ended somehow
 	defer tx.Rollback(ctx)
@@ -205,19 +208,19 @@ func TagQuery(ctx context.Context, query Query) ([]Resource, error) {
     ;`
 	rows, err := tx.Query(ctx, querystr, query.Include.Inner, query.Exclude.Inner, query.Offset, query.Limit)
 	if err != nil {
-		return nil, errorWithContext{err, "TagQuery query issue"}
+		return nil, _error.ErrorWithContext{Original: err, Message: "TagQuery query issue"}
 	}
 	defer rows.Close()
 
-	var final []Resource
+	var final []model.Resource
 	for rows.Next() {
-		var rsrc Resource
+		var rsrc model.Resource
 		var tags []string
 		err = rows.Scan(&rsrc.Id, &rsrc.CreatedAt, &rsrc.Mimetype, &tags)
 		if err != nil {
-			return nil, errorWithContext{err, "TagQuery rowscan issue"}
+			return nil, _error.ErrorWithContext{Original: err, Message: "TagQuery rowscan issue"}
 		}
-		rsrc.Tags.fromSlice(tags)
+		rsrc.Tags.FromSlice(tags)
 		final = append(final, rsrc)
 	}
 	return final, nil
@@ -227,7 +230,7 @@ func GetBytes(ctx context.Context, id string) ([]byte, error) {
 	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
 	tx, err := dbpool.Begin(ctx)
 	if err != nil {
-		return nil, errorWithContext{err, "GetBytes tx err"}
+		return nil, _error.ErrorWithContext{Original: err, Message: "GetBytes tx err"}
 	}
 	// Transaction should always be ended somehow
 	defer tx.Rollback(ctx)
@@ -236,19 +239,19 @@ func GetBytes(ctx context.Context, id string) ([]byte, error) {
 	var bts []byte
 	err = row.Scan(&bts)
 	if err != nil {
-		return nil, errorWithContext{err, "GetBytes could not scan row"}
+		return nil, _error.ErrorWithContext{Original: err, Message: "GetBytes could not scan row"}
 	}
 	return bts, nil
 }
 
 // if the error return is nil, the caller must call returned callback to close the database connection
 func ConnectDatabases(ctx context.Context) (context.Context, func(), error) {
-	config := ctx.Value(ctxkeyConfig(0)).(Config).SQL
+	config := config.Global.SQL
 
 	// Load database connection
 	dbpool, err := pgxpool.New(context.Background(), config.Url)
 	if err != nil {
-		return ctx, func() {}, errorWithContext{err, "cannot connect to database"}
+		return ctx, func() {}, _error.ErrorWithContext{err, "cannot connect to database"}
 	}
 
 	ctx = context.WithValue(ctx, ctxkeyDriver(0), dbpool)

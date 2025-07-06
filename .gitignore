@@ -1,5 +1,6 @@
 dist/
 files/
 # build artifact
-ftag
+/ftag
+!/ftag/
 ftag.config.json

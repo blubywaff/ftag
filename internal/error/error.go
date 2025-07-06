@@ -1,22 +1,22 @@
-package main
+package _error
 
-type errorWithContext struct {
-	original error
-	message  string
+type ErrorWithContext struct {
+	Original error
+	Message  string
 }
 
-func (e errorWithContext) Error() string {
-	return e.message + ": " + e.original.Error()
+func (e ErrorWithContext) Error() string {
+	return e.Message + ": " + e.Original.Error()
 }
 
-func (e errorWithContext) Unwrap() error {
-	return e.original
+func (e ErrorWithContext) Unwrap() error {
+	return e.Original
 }
 
 // Represents a result that can be cancelled or undone
 type IntermediateResult struct {
-	cleanup func() error
-	err     error
+	Cleanup func() error
+	Err     error
 }
 
 func IntermediateResultFromError(err error) IntermediateResult {
@@ -26,12 +26,12 @@ func IntermediateResultFromError(err error) IntermediateResult {
 // return nil if cleanup was successful
 // this includes cases where there was nothing to clenaup because the original operation failed
 func (ir *IntermediateResult) Clean() error {
-	if ir.err != nil {
+	if ir.Err != nil {
 		return nil
 	}
-	return ir.cleanup()
+	return ir.Cleanup()
 }
 
 func (ir *IntermediateResult) OpError() error {
-	return ir.err
+	return ir.Err
 }

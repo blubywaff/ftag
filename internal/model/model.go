@@ -1,4 +1,4 @@
-package main
+package model
 
 import (
 	"encoding/base64"
@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	_error "github.com/blubywaff/ftag/internal/error"
 )
 
 type Resource struct {
@@ -153,7 +155,7 @@ func (ts *TagSet) remove(str string) error {
 	return nil
 }
 
-func (ts *TagSet) fromSlice(sstr []string) error {
+func (ts *TagSet) FromSlice(sstr []string) error {
 	// use insertion sort b/c a single set is not expected
 	// to have more than a couple dozen tags
 	for i := 1; i < len(sstr); i++ {
@@ -165,15 +167,6 @@ func (ts *TagSet) fromSlice(sstr []string) error {
 	}
 	ts.Inner = sstr
 	return nil
-}
-
-type Config_SQL struct {
-	Url string
-}
-
-type Config struct {
-	SQL     Config_SQL
-	UrlBase string
 }
 
 type PageMeta struct {
@@ -190,6 +183,8 @@ type UserSettings struct {
 	View UserSettings_View
 }
 
+type CtxkeyUserSettings int
+
 // / Will always leave the settings in a good state
 // / If s is invalid, returns error and sets to default settings
 func (ust *UserSettings) FromCookieString(s string) error {
@@ -199,16 +194,16 @@ func (ust *UserSettings) FromCookieString(s string) error {
 	bts = bts[:n]
 	if err != nil {
 		ust.View = DefaultUserSettings.View
-		return errorWithContext{err, "base64 encoding error on ust"}
+		return _error.ErrorWithContext{Original: err, Message: "base64 encoding error on ust"}
 	}
 	err = json.Unmarshal(bts, ust)
 	if err != nil {
 		ust.View = DefaultUserSettings.View
-		return errorWithContext{err, "json unmarshal error on ust"}
+		return _error.ErrorWithContext{Original: err, Message: "json unmarshal error on ust"}
 	}
 	if err := ust.Verify(); err != nil {
 		ust.View = DefaultUserSettings.View
-		return errorWithContext{err, "could not verify ust on decode"}
+		return _error.ErrorWithContext{Original: err, Message: "could not verify ust on decode"}
 	}
 	return nil
 }
@@ -216,11 +211,11 @@ func (ust *UserSettings) FromCookieString(s string) error {
 func (ust *UserSettings) ToCookieString() (string, error) {
 	if err := ust.Verify(); err != nil {
 		ust.View = DefaultUserSettings.View
-		return "", errorWithContext{err, "could not verify ust on encode:"}
+		return "", _error.ErrorWithContext{Original: err, Message: "could not verify ust on encode:"}
 	}
 	bts, err := json.Marshal(ust)
 	if err != nil {
-		return "", errorWithContext{err, "json unmarshal error on ust:"}
+		return "", _error.ErrorWithContext{Original: err, Message: "json unmarshal error on ust:"}
 	}
 	dst := make([]byte, base64.StdEncoding.EncodedLen(len(bts)))
 	base64.StdEncoding.Encode(dst, bts)

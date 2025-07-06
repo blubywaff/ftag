@@ -1,5 +1,5 @@
 npx @tailwindcss/cli -i web/style.css -o dist/style.css
-gofmt -w *.go
+gofmt -w {cmd,internal}/**/*.go
 rm ftag
-CGO_ENABLED=0 go build .
+CGO_ENABLED=0 go build ./cmd/ftag/
 cp -r web/scripts dist/scripts

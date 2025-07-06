@@ -3,17 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"flag"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/blubywaff/ftag/internal/config"
+	"github.com/blubywaff/ftag/internal/db"
+	"github.com/blubywaff/ftag/internal/error"
+	"github.com/blubywaff/ftag/internal/model"
 )
 
 var templates *template.Template
@@ -23,9 +25,6 @@ var (
 	EMPTY_FORM               = errors.New("empty form")
 	MISSING_FORM_REQUIREMENT = errors.New("required form field not present")
 )
-
-type ctxkeyConfig int
-type ctxkeyUserSettings int
 
 func landingPage(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(200)
@@ -38,10 +37,10 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 			res,
 			"multiupload.gohtml",
 			struct {
-				PageMeta PageMeta
+				PageMeta model.PageMeta
 			}{
-				PageMeta{
-					"Upload",
+				model.PageMeta{
+					Title: "Upload",
 				},
 			},
 		)
@@ -55,7 +54,6 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(405)
 		return
 	}
-	config := req.Context().Value(ctxkeyConfig(0)).(Config)
 	// 1024 megabytes
 	// consider using maltipart reader to avoid reading oversized uploads
 	err := req.ParseMultipartForm(1 << 30)
@@ -65,7 +63,7 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	var tags TagSet
+	var tags model.TagSet
 	badtags := tags.FillFromString(req.FormValue("tags"))
 	if len(badtags) != 0 {
 		http.Error(res, "Some tags were invalid, multiupload aborted.", 400)
@@ -80,25 +78,28 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 			continue // safety measure TODO figure this out
 		}
 		defer f.Close()
-		_, err = AddFile(req.Context(), f, tags)
+		_, err = db.AddFile(req.Context(), f, tags)
 		if err != nil {
 			log.Println("failed to write file to database", err)
 			continue // TODO there should be some failure mode here
 		}
 	}
 
-	res.Header().Add("location", config.UrlBase+"/site/view")
+	res.Header().Add("location", config.Global.UrlBase+"/site/view")
 	res.WriteHeader(303)
 }
 
 func editreqLogic(req *http.Request) (string, []string, []string, error) {
 	formReader, err := req.MultipartReader()
 	if err != nil {
-		err = errorWithContext{err, "could not open multipart reader"}
+		err = _error.ErrorWithContext{
+			Original: err,
+			Message:  "could not open multipart reader",
+		}
 		log.Println(err)
 		return "", nil, nil, err
 	}
-	var addtags, deltags TagSet
+	var addtags, deltags model.TagSet
 	var failedAdd, failedDel []string
 	var resourceId string
 	for {
@@ -107,7 +108,10 @@ func editreqLogic(req *http.Request) (string, []string, []string, error) {
 			break
 		}
 		if err != nil {
-			err = errorWithContext{err, "failed on form part"}
+			err = _error.ErrorWithContext{
+				Original: err,
+				Message:  "failed on form part",
+			}
 			return "", nil, nil, err
 		}
 		switch part.FormName() {
@@ -145,23 +149,28 @@ func editreqLogic(req *http.Request) (string, []string, []string, error) {
 		return resourceId, nil, nil, EMPTY_FORM
 	}
 
-	if err := ChangeTags(req.Context(), addtags, deltags, resourceId); err != nil {
-		err = errorWithContext{err, "database failure on changetags"}
+	if err := db.ChangeTags(req.Context(), addtags, deltags, resourceId); err != nil {
+		err = _error.ErrorWithContext{
+			Original: err,
+			Message:  "database failure on changetags",
+		}
 		return resourceId, failedAdd, failedDel, err
 	}
 	return resourceId, failedAdd, failedDel, nil
 }
 
 func viewPage(res http.ResponseWriter, req *http.Request) {
-	config := req.Context().Value(ctxkeyConfig(0)).(Config)
 	if req.Method == "POST" {
 		_, _, _, err := editreqLogic(req)
 		if err != nil {
-			log.Print(errorWithContext{err, "failure of editreqlogic for view page"})
+			log.Print(_error.ErrorWithContext{
+				Original: err,
+				Message:  "failure of editreqlogic for view page",
+			})
 			res.WriteHeader(500)
 			return
 		}
-		res.Header().Add("location", config.UrlBase+req.URL.RequestURI())
+		res.Header().Add("location", config.Global.UrlBase+req.URL.RequestURI())
 		res.WriteHeader(303)
 		return
 	}
@@ -175,11 +184,11 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 			"view.gohtml",
 			struct {
 				Render   string
-				PageMeta PageMeta
+				PageMeta model.PageMeta
 				Resource interface{}
 			}{
 				"empty",
-				PageMeta{
+				model.PageMeta{
 					Title: "Viewer",
 				},
 				nil,
@@ -191,21 +200,21 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		}
 		return
 	}
-	ust := req.Context().Value(ctxkeyUserSettings(0)).(UserSettings)
+	ust := req.Context().Value(model.CtxkeyUserSettings(0)).(model.UserSettings)
 	idstr, ok := req.URL.Query()["id"]
 	if ok {
-		rsrc, err := GetFile(req.Context(), idstr[0])
+		rsrc, err := db.GetFile(req.Context(), idstr[0])
 		err = templates.ExecuteTemplate(
 			res,
 			"view.gohtml",
 			struct {
 				Render       string
-				PageMeta     PageMeta
+				PageMeta     model.PageMeta
 				Resource     interface{}
-				UserSettings UserSettings
+				UserSettings model.UserSettings
 			}{
 				"id",
-				PageMeta{
+				model.PageMeta{
 					Title: "Viewer",
 				},
 				rsrc,
@@ -218,7 +227,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		}
 		return
 	}
-	var intag, extag TagSet
+	var intag, extag model.TagSet
 	var index int
 	intagstr, ok := req.URL.Query()["intags"]
 	if !ok {
@@ -248,8 +257,8 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 	}
 	// Adds all user default exclusions that are not specifically included
 	extag.Union(*ust.View.DefaultExcludes.Duplicate().Difference(intag))
-	query := Query{Include: intag, Exclude: extag, Offset: index - 1, Limit: 1}
-	rsrcs, err := TagQuery(req.Context(), query)
+	query := model.Query{Include: intag, Exclude: extag, Offset: index - 1, Limit: 1}
+	rsrcs, err := db.TagQuery(req.Context(), query)
 	if err != nil {
 		res.WriteHeader(500)
 		log.Println("err with viewPage db TagQuery", err)
@@ -268,19 +277,19 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		"view.gohtml",
 		struct {
 			Render       string
-			PageMeta     PageMeta
-			Resource     Resource
+			PageMeta     model.PageMeta
+			Resource     model.Resource
 			PrevLink     string
 			NextLink     string
-			UserSettings UserSettings
+			UserSettings model.UserSettings
 		}{
 			"query",
-			PageMeta{
+			model.PageMeta{
 				Title: "Viewing " + rsrcs[0].Id,
 			},
 			rsrcs[0],
-			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0],
-			config.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0],
+			config.Global.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0],
+			config.Global.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0],
 			ust,
 		},
 	)
@@ -292,12 +301,14 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 
 func settingsPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method == "GET" {
-		us := req.Context().Value(ctxkeyUserSettings(0)).(UserSettings)
+		us := req.Context().Value(model.CtxkeyUserSettings(0)).(model.UserSettings)
 		err := templates.ExecuteTemplate(res, "settings.gohtml", struct {
-			PageMeta     PageMeta
-			UserSettings UserSettings
+			PageMeta     model.PageMeta
+			UserSettings model.UserSettings
 		}{
-			PageMeta{"Settings"},
+			model.PageMeta{
+				Title: "Settings",
+			},
 			us,
 		})
 		if err != nil {
@@ -310,7 +321,7 @@ func settingsPage(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(405)
 		return
 	}
-	var ust UserSettings
+	var ust model.UserSettings
 	req.ParseForm()
 	ust.View.TagVisibility = req.FormValue("view-tags")
 	ust.View.DefaultExcludes.FillFromString(req.FormValue("def-ex"))
@@ -326,13 +337,13 @@ func settingsPage(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	http.SetCookie(res, &http.Cookie{Name: "settings", Value: str})
-	res.Header().Add("location", req.Context().Value(ctxkeyConfig(0)).(Config).UrlBase+"/site/settings")
+	res.Header().Add("location", config.Global.UrlBase+"/site/settings")
 	res.WriteHeader(303)
 }
 
 func servefile(res http.ResponseWriter, req *http.Request) {
 	id := req.URL.Path[len("/files/"):]
-	bts, err := GetBytes(req.Context(), id)
+	bts, err := db.GetBytes(req.Context(), id)
 	if err != nil {
 		http.Error(res, "Server error", 500)
 		return
@@ -357,10 +368,10 @@ func addContext(ctx context.Context, next http.Handler) http.Handler {
 func attachUserSettings(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
-		var userSettings UserSettings
+		var userSettings model.UserSettings
 		cookie, err := req.Cookie("settings")
 		if err == http.ErrNoCookie {
-			userSettings = DefaultUserSettings
+			userSettings = model.DefaultUserSettings
 			goto gonext
 		}
 		err = userSettings.FromCookieString(cookie.Value)
@@ -368,50 +379,31 @@ func attachUserSettings(next http.Handler) http.Handler {
 			log.Println("Could not get userSettings:", err)
 		}
 	gonext:
-		next.ServeHTTP(res, req.WithContext(context.WithValue(ctx, ctxkeyUserSettings(0), userSettings)))
+		next.ServeHTTP(res, req.WithContext(context.WithValue(ctx, model.CtxkeyUserSettings(0), userSettings)))
 	})
 }
 
 func main() {
-	// Declare limited flags
-	var (
-		cleanupFlag    = flag.Bool("clean", false, "If the database should be cleaned on startup.")
-		configPathFlag = flag.String("config", "ftag.config.json", "The location of the config file.")
-	)
-
-	// Parse flags
-	flag.Parse()
-
 	// Setup Context
 	var ctx = context.Background()
 
-	// Parse Config
-	bts, err := os.ReadFile(*configPathFlag)
-	if err != nil {
-		log.Fatal("failed to read config:", err)
-	}
-	var config Config
-	json.Unmarshal(bts, &config)
-	ctx = context.WithValue(ctx, ctxkeyConfig(0), config)
+	// Load config
+	config.Load()
 
 	// Load Templates
 	templates = template.Must(template.New("").Funcs(map[string]any{
 		"hasPrefix":   strings.HasPrefix,
-		"getBaseUrl":  func() string { return config.UrlBase },
-		"stringifyTS": func(ts TagSet) string { return ts.String() },
+		"getBaseUrl":  func() string { return config.Global.UrlBase },
+		"stringifyTS": func(ts model.TagSet) string { return ts.String() },
 	}).ParseGlob("./templates/*.gohtml"))
 
 	// Load database connection
 	var dbclose func()
-	ctx, dbclose, err = ConnectDatabases(ctx)
+	ctx, dbclose, err := db.ConnectDatabases(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer dbclose()
-
-	if *cleanupFlag {
-		log.Fatal("Feature Not Supported")
-	}
 
 	server := http.NewServeMux()
 
@@ -424,5 +416,5 @@ func main() {
 	server.HandleFunc("/site/view", viewPage)
 	server.HandleFunc("/site/settings", settingsPage)
 
-	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, attachUserSettings(http.StripPrefix(config.UrlBase, server)))))
+	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, attachUserSettings(http.StripPrefix(config.Global.UrlBase, server)))))
 }
