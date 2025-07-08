@@ -1,0 +1,34 @@
+# TagQuery
+# Get all resources with intags and no extags
+intags = [tagname, ...]  # 1 <= len (see below when len == 0)
+extags = [tagname, ...]  # 0 <= len
+g.V().hasLabel('tag')
+.where(values('name').is_(within(*intags)))
+.out('describes').groupCount().unfold()
+.where(select(Column.values).is_(eq(len(intags))))
+.select(Column.keys)
+.where(
+    in_('describes')
+    .values('name').fold()
+    .all_(not_(within(*extags))))
+.valueMap()
+# Special Case: When intags is empty
+g.V().hasLabel('resource')
+.where(
+    in_('describes')
+    .values('name').fold()
+    .all_(not_(within(*extags))))
+.valueMap()
+
+# Add Resources
+# Add resources with predefined tags
+rsc_details = [[r:rsc_id, m:mime, u:upload], [r:rsc_id, m:mime, u:upload], ...]  # 1 <= len
+tags = [tagname, ...]  # 0 <= len
+g.inject(*rsc_details).addV('resource')
+.property('rsc_id', select('r'))
+.property('mime', select('m'))
+.property('upload', select('u'))
+.as('r')
+.V().hasLabel('tag')
+.where(values('name').is(within(tags))).as('t')
+.addE('describes').from('t').to('r')
