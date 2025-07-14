@@ -1,5 +1,7 @@
 package _error
 
+import "errors"
+
 type ErrorWithContext struct {
 	Original error
 	Message  string
@@ -34,4 +36,12 @@ func (ir *IntermediateResult) Clean() error {
 
 func (ir *IntermediateResult) OpError() error {
 	return ir.Err
+}
+
+func (ir *IntermediateResult) Commit() error {
+	if ir.Err != nil {
+		return ir.Err
+	}
+	ir.Err = errors.New("result already committed")
+	return nil
 }

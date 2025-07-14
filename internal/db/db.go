@@ -1,25 +1,75 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"errors"
 
+	gremlingo "github.com/apache/tinkerpop/gremlin-go/v3/driver"
 	"github.com/blubywaff/ftag/internal/config"
 	"github.com/blubywaff/ftag/internal/error"
 	"github.com/blubywaff/ftag/internal/model"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var TimeFormat = time.RFC3339
+var TimeFormatP = []string{time.RFC3339, time.RFC3339Nano, "2006-01-02T15:04:05"}
+
+// common
+var __ = gremlingo.T__
+var TextP = gremlingo.TextP
+
+type GraphTraversal = gremlingo.GraphTraversal
+type GraphTraversalSource = gremlingo.GraphTraversalSource
+type DriverRemoteConnection = gremlingo.DriverRemoteConnection
+
+// predicates
+var between = gremlingo.P.Between
+var eq = gremlingo.P.Eq
+var gt = gremlingo.P.Gt
+var gte = gremlingo.P.Gte
+var inside = gremlingo.P.Inside
+var lt = gremlingo.P.Lt
+var lte = gremlingo.P.Lte
+var neq = gremlingo.P.Neq
+var not = gremlingo.P.Not
+var outside = gremlingo.P.Outside
+var test = gremlingo.P.Test
+var within = gremlingo.P.Within
+var without = gremlingo.P.Without
+var and = gremlingo.P.And
+var or = gremlingo.P.Or
+
+// sorting
+var order = gremlingo.Order
+
+// selects
+var keys = gremlingo.Column.Keys
+var values = gremlingo.Column.Values
+var outV = gremlingo.Merge.OutV
+var inV = gremlingo.Merge.InV
+var label = gremlingo.T.Label
+var from = gremlingo.Direction.From
+var to = gremlingo.Direction.To
+var desc = gremlingo.Order.Desc
+var asc = gremlingo.Order.Asc
 var NO_RESULT error = errors.New("database no result")
 
-type ctxkeyDriver int
+type Database interface {
+	// returns the id of the newly added file
+	AddFile(ctx context.Context, f io.Reader, tags model.TagSet) (string, error)
+	ChangeTags(ctx context.Context, addtags model.TagSet, deltags model.TagSet, id string) error
+	TagQuery(ctx context.Context, query model.Query) ([]model.Resource, error)
+	GetFile(ctx context.Context, id string) (model.Resource, error)
+	GetBytes(ctx context.Context, id string) ([]byte, error)
+	Close(ctx context.Context) error
+}
 
 func GenUUID() (string, error) {
 	rid, err := uuid.NewRandom()
@@ -30,232 +80,289 @@ func GenUUID() (string, error) {
 	return id, nil
 }
 
-// returns id of the resource if created (err == nil)
-func AddFile(ctx context.Context, f io.Reader, tags model.TagSet) (string, error) {
-	// Generate id, mimetype
-	var bts = make([]byte, 1<<25) // 32 MB
-	nRead, err := f.Read(bts)
-	if nRead == 0 {
+func ToInterfaceSlice[T any](in []T) []interface{} {
+	res := make([]interface{}, len(in))
+	for i, v := range in {
+		res[i] = v
+	}
+	return res
+}
+
+func FromInterfaceSlice[T any](in []interface{}) ([]T, error) {
+	res := make([]T, len(in))
+	var ok bool
+	for i, v := range in {
+		res[i], ok = v.(T)
+		if !ok {
+			return nil, errors.New("invalid type within slice conversion")
+		}
+	}
+	return res, nil
+}
+
+type Tinkerpop struct {
+	g      *GraphTraversalSource
+	remote *gremlingo.DriverRemoteConnection
+}
+
+func ToResources(g *GraphTraversal) ([]model.Resource, error) {
+	rs, err := g.GetResultSet()
+	var resources []model.Resource
+	if err != nil {
+		return nil, errors.New("result set failure")
+	}
+	for r := range rs.Channel() {
+		var resource model.Resource
+		m, ok := r.Data.(map[interface{}]interface{})
+		if !ok {
+			return nil, errors.New("Invalid type top map")
+		}
+		v, ok := m["r"].(map[interface{}]interface{})
+		if !ok {
+			return nil, errors.New("Invalid type resource map")
+		}
+		t, ok := m["t"].([]interface{})
+		if !ok {
+			return nil, errors.New("Invalid type tag slice")
+		}
+		ts, err := FromInterfaceSlice[string](t)
+		if err != nil {
+			return nil, errors.New("Invalid tags tagset slice")
+		}
+		err = resource.Tags.FromSlice(ts)
+		if err != nil {
+			return nil, errors.New("Invalid tags tagset")
+		}
+		resource.Id, ok = v["rsc_id"].(string)
+		if !ok {
+			return nil, errors.New("Invalid type rsc id")
+		}
+		resource.Mimetype, ok = v["mime"].(string)
+		if !ok {
+			return nil, errors.New("Invalid type mime")
+		}
+		upload, ok := v["upload"].(string)
+		if !ok {
+			return nil, errors.New("Invalid type upload")
+		}
+		err = nil
+		for _, tf := range TimeFormatP {
+			resource.CreatedAt, err = time.Parse(tf, upload)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			return nil, errors.New("Invalid timestamp (parsing)")
+		}
+		resources = append(resources, resource)
+	}
+	return resources, nil
+}
+
+func (t *Tinkerpop) AddFile(ctx context.Context, f io.Reader, tags model.TagSet) (string, error) {
+	tx := t.g.Tx()
+	g, err := tx.Begin()
+	if err != nil {
 		return "", err
 	}
-	if err != nil && err != io.EOF {
+	defer tx.Rollback()
+	uid, mime, ir := writeFileReversible(f)
+	if err := ir.OpError(); err != nil {
 		return "", err
+	}
+	defer ir.Clean()
+	resource_map := make(map[string]string)
+	resource_map["r"] = uid
+	resource_map["m"] = mime
+	resource_map["u"] = time.Now().UTC().Format(TimeFormat)
+	ce := g.Inject(resource_map).
+		AddV("resource").
+		Property("rsc_id", __.Select("r")).
+		Property("mime", __.Select("m")).
+		Property("upload", __.Select("u")).As("r").
+		V().HasLabel("tag").
+		Where(__.Values("name").Is(within(ToInterfaceSlice(tags.Inner)...))).As("t").
+		AddE("describes").From(__.Select("t")).To(__.Select("r")).
+		Iterate()
+	err = <-ce
+	if err != nil {
+		return "", err
+	}
+	err = tx.Commit()
+	if err != nil {
+		return "", err
+	}
+	err = ir.Commit()
+	if err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+// Returns id, mimetype, canceller
+func writeFileReversible(f io.Reader) (string, string, _error.IntermediateResult) {
+	hasFailed := false
+	doFail := func() { hasFailed = true }
+
+	// only need 512 because that is the max considered by `http.DetectContentType`
+	var bts = make([]byte, 512)
+	n, err := f.Read(bts)
+	if n == 0 {
+		doFail()
+		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "empty read for mime type"})
+	}
+	if err != nil && err != io.EOF {
+		doFail()
+		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "failed to read for mime type"})
 	}
 	mimetype := http.DetectContentType(bts)
 
 	id, err := GenUUID()
 	if err != nil {
-		return "", err
+		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "could not create uuid"})
 	}
 
-	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
-	tx, err := dbpool.Begin(ctx)
+	file, err := os.OpenFile("files/"+id, os.O_WRONLY|os.O_CREATE, os.ModePerm)
 	if err != nil {
-		return "", err
+		doFail()
+		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "could not create file"})
 	}
-
-	// Make sure dead or interrupted transactions are always rolled back
-	defer tx.Rollback(ctx)
-
-	// Create resource
-	_, err = tx.Exec(ctx, "INSERT INTO Resource (id, mime, upload, data) VALUES ($1::uuid, $2, $3, $4);", id, mimetype, time.Now().UTC(), bts)
-	if err != nil {
-		return "", _error.ErrorWithContext{Original: err, Message: "database failed for resource creation"}
-	}
-
-	// Add tags
-	var ids []string
-	for i := 0; i < tags.Len(); i++ {
-		uuid, err := GenUUID()
-		if err != nil {
-			return "", err
+	defer func(_id string) {
+		if err := file.Close(); err != nil {
+			// This represents a serious program issue
+			log.Panicln("UNEX double close")
 		}
-		ids = append(ids, uuid)
-	}
-	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, tags.Inner)
+		if !hasFailed {
+			return
+		}
+		if err := os.Remove(file.Name()); err != nil {
+			log.Println("could not delete on fail: " + _id)
+		}
+	}(id)
+
+	_, err = io.Copy(file, bytes.NewReader(bts))
 	if err != nil {
-		return "", _error.ErrorWithContext{Original: err, Message: "tx failed to add tags"}
+		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "failed on peek copy"})
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt;", id, tags.Inner)
+	_, err = io.Copy(file, f)
 	if err != nil {
-		return "", _error.ErrorWithContext{Original: err, Message: "tx failed to add tag connects"}
+		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "failed on full copy"})
 	}
-	tx.Commit(ctx)
-	return id, nil
+
+	return id, mimetype, _error.IntermediateResult{
+		Cleanup: func() error {
+			if err := os.Remove(file.Name()); err != nil {
+				log.Println("could not delete on fail: " + id)
+				return err
+			}
+			return nil
+		},
+		Err: nil,
+	}
 }
 
-func GetFile(ctx context.Context, id string) (model.Resource, error) {
-	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
-	tx, err := dbpool.Begin(ctx)
+func (t *Tinkerpop) TagQuery(ctx context.Context, query model.Query) ([]model.Resource, error) {
+	var gt *GraphTraversal
+	if query.Include.Len() == 0 {
+		gt = t.g.V().HasLabel("resource")
+	} else {
+		gt = t.g.V().HasLabel("tag").
+			Where(__.Values("name").Is(within(ToInterfaceSlice(query.Include.Inner)...))).
+			Out("describes").GroupCount().Unfold().
+			Where(__.Select(values).Is(eq(query.Include.Len()))).
+			Select(keys)
+	}
+
+	val := gt.As("r").In("describes").Values("name").
+		Group().By(__.Select("r")).Unfold().
+		Where(
+			__.Select(values).
+				All(not(within(ToInterfaceSlice(query.Exclude.Inner)...)))).
+		Order().By(__.Select(keys).Values("upload"), desc).
+		Skip(query.Offset).Limit(query.Limit).
+		As("r").Project("r", "t").
+		By(__.Select(keys).ElementMap()).
+		By(__.Select(values))
+
+	return ToResources(val)
+}
+
+func (t *Tinkerpop) GetFile(ctx context.Context, id string) (model.Resource, error) {
+	tr := t.g.V().
+		Has("resource", "rsc_id", id).
+		As("r").
+		In("describes").
+		Values("name").
+		Group().
+		By(__.Select("r")).
+		Unfold().
+		Project("r", "t").
+		By(__.Select(keys).ElementMap()).
+		By(__.Select(values))
+
+	resources, err := ToResources(tr)
 	if err != nil {
 		return model.Resource{}, err
 	}
-	// Transaction should always be ended somehow
-	defer tx.Rollback(ctx)
-
-	var batch pgx.Batch
-	_ = batch.Queue("SELECT id, mime, upload FROM Resource WHERE id = $1::uuid;", id)
-	_ = batch.Queue("SELECT Tag.name FROM TagOn LEFT JOIN Tag ON TagOn.tag_id = Tag.id WHERE resource_id = $1::uuid;", id)
-	br := tx.SendBatch(ctx, &batch)
-
-	// exactly one of these will be written to
-	rchan := make(chan model.Resource)
-	echan := make(chan error)
-	go func() {
-		rows, err := br.Query()
-		if err != nil {
-			echan <- _error.ErrorWithContext{Original: err, Message: "getfile query issue"}
-			return
-		}
-		if !rows.Next() {
-			echan <- rows.Err()
-			return
-		}
-		var rsrc model.Resource
-		err = rows.Scan(&rsrc.Id, &rsrc.Mimetype, &rsrc.CreatedAt)
-		if err != nil {
-			echan <- _error.ErrorWithContext{Original: err, Message: "getfile tag scan issue"}
-			return
-		}
-		rows.Close()
-		rows, err = br.Query()
-		if err != nil {
-			echan <- _error.ErrorWithContext{Original: err, Message: "getfile query issue"}
-			return
-		}
-		for rows.Next() {
-			var tag string
-			err = rows.Scan(&tag)
-			if err != nil {
-				echan <- _error.ErrorWithContext{Original: err, Message: "getfile scan issue"}
-				return
-			}
-			err = rsrc.Tags.Add(tag)
-		}
-		if rows.Err() != nil {
-			echan <- _error.ErrorWithContext{Original: err, Message: "getfile rows issue"}
-			return
-		}
-		rchan <- rsrc
-		return
-	}()
-
-	var rsrc model.Resource
-
-	select {
-	case err = <-echan:
-		log.Print("get file db err: ", err)
-		return rsrc, err
-	case rsrc = <-rchan:
-		// There's nothing to commit since this is read-only, but this ensures resources are cleaned up
-		// since we can't read from a completed transaction, hopefully everything clean
-		tx.Commit(context.Background())
-		return rsrc, nil
-	}
+	return resources[0], nil
 }
 
-func ChangeTags(ctx context.Context, addtags model.TagSet, deltags model.TagSet, id string) error {
-	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
-	tx, err := dbpool.Begin(ctx)
+func (t *Tinkerpop) ChangeTags(ctx context.Context, addtags model.TagSet, deltags model.TagSet, id string) error {
+	tx := t.g.Tx()
+	g, err := tx.Begin()
 	if err != nil {
 		return err
 	}
-	// Transaction should always be ended somehow
-	defer tx.Rollback(ctx)
-
-	_, err = tx.Exec(ctx, "DELETE FROM TagOn WHERE resource_id = $1::uuid AND tag_id IN (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2));", id, deltags.Inner)
+	defer tx.Rollback()
+	ce := g.V().HasLabel("resource").
+		Where(__.Values("rsc_id").Is(within([]interface{}{id}...))).As("r").
+		V().HasLabel("tag").
+		Where(__.Values("name").Is(within(ToInterfaceSlice(addtags.Inner)...))).As("t").
+		MergeE(
+			map[interface{}]interface{}{
+				(label): "describes",
+				(from):  outV,
+				(to):    inV,
+			}).
+		Option(outV, __.Select("t")).
+		Option(inV, __.Select("r")).
+		Iterate()
+	err = <-ce
 	if err != nil {
-		log.Print("ChangeTags Delete issue ", err)
 		return err
 	}
-	// Add tags
-	var ids []string
-	for i := 0; i < addtags.Len(); i++ {
-		uuid, err := GenUUID()
-		if err != nil {
-			return err
-		}
-		ids = append(ids, uuid)
-	}
-	// Add Tag Connects
-	_, err = tx.Exec(ctx, "INSERT INTO Tag SELECT unnest($1::uuid[]), unnest($2::text[]) ON CONFLICT DO NOTHING;", ids, addtags.Inner)
+	ce = g.V().HasLabel("resource").
+		Where(__.Values("rsc_id").Is(within([]interface{}{id}...))).
+		InE("describes").
+		Where(__.OutV().Values("name").Is(within(ToInterfaceSlice(deltags.Inner)...))).
+		Drop().
+		Iterate()
+	err = <-ce
 	if err != nil {
-		return _error.ErrorWithContext{Original: err, Message: "tx failed to add tags"}
-	}
-	_, err = tx.Exec(ctx, "INSERT INTO TagOn (resource_id, tag_id) SELECT $1::uuid, ttt.id FROM (SELECT Tag.id FROM Tag WHERE Tag.name = any ($2)) AS ttt ON CONFLICT DO NOTHING;", id, addtags.Inner)
-	if err != nil {
-		log.Print("ChangeTags insert issue", err)
 		return err
 	}
-	tx.Commit(ctx)
+	tx.Commit()
 	return nil
 }
 
-func TagQuery(ctx context.Context, query model.Query) ([]model.Resource, error) {
-	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
-	tx, err := dbpool.Begin(ctx)
-	if err != nil {
-		return nil, _error.ErrorWithContext{Original: err, Message: "TagQuery tx err"}
-	}
-	// Transaction should always be ended somehow
-	defer tx.Rollback(ctx)
-
-	querystr := `
-    SELECT tq.id as id, tq.upload as upload, tq.mime as mime, ARRAY_AGG(rt.name) as tags
-    FROM tagquery($1, $2, $3, $4) AS tq, rtags AS rt
-    WHERE tq.id = rt.id
-    GROUP BY tq.id, tq.upload, tq.mime
-    ;`
-	rows, err := tx.Query(ctx, querystr, query.Include.Inner, query.Exclude.Inner, query.Offset, query.Limit)
-	if err != nil {
-		return nil, _error.ErrorWithContext{Original: err, Message: "TagQuery query issue"}
-	}
-	defer rows.Close()
-
-	var final []model.Resource
-	for rows.Next() {
-		var rsrc model.Resource
-		var tags []string
-		err = rows.Scan(&rsrc.Id, &rsrc.CreatedAt, &rsrc.Mimetype, &tags)
-		if err != nil {
-			return nil, _error.ErrorWithContext{Original: err, Message: "TagQuery rowscan issue"}
-		}
-		rsrc.Tags.FromSlice(tags)
-		final = append(final, rsrc)
-	}
-	return final, nil
+func (t *Tinkerpop) GetBytes(ctx context.Context, id string) ([]byte, error) {
+	return os.ReadFile("./files/" + id)
 }
 
-func GetBytes(ctx context.Context, id string) ([]byte, error) {
-	dbpool := ctx.Value(ctxkeyDriver(0)).(*pgxpool.Pool)
-	tx, err := dbpool.Begin(ctx)
-	if err != nil {
-		return nil, _error.ErrorWithContext{Original: err, Message: "GetBytes tx err"}
-	}
-	// Transaction should always be ended somehow
-	defer tx.Rollback(ctx)
-
-	row := tx.QueryRow(ctx, "SELECT data FROM Resource WHERE id = $1::uuid", id)
-	var bts []byte
-	err = row.Scan(&bts)
-	if err != nil {
-		return nil, _error.ErrorWithContext{Original: err, Message: "GetBytes could not scan row"}
-	}
-	return bts, nil
+func (t *Tinkerpop) Close(ctx context.Context) error {
+	t.remote.Close()
+	return nil
 }
 
-// if the error return is nil, the caller must call returned callback to close the database connection
-func ConnectDatabases(ctx context.Context) (context.Context, func(), error) {
-	config := config.Global.SQL
+func ConnectDatabases(ctx context.Context) (*Tinkerpop, error) {
+	config := config.Global.Gremlin
 
-	// Load database connection
-	dbpool, err := pgxpool.New(context.Background(), config.Url)
-	if err != nil {
-		return ctx, func() {}, _error.ErrorWithContext{err, "cannot connect to database"}
-	}
+	var result Tinkerpop
 
-	ctx = context.WithValue(ctx, ctxkeyDriver(0), dbpool)
-	return ctx, func() {
-		dbpool.Close()
-	}, nil
+	remote, err := gremlingo.NewDriverRemoteConnection(config.Url)
+	result.g = gremlingo.Traversal_().WithRemote(remote)
+	result.remote = remote
+
+	return &result, err
 }

@@ -20,6 +20,8 @@ import (
 
 var templates *template.Template
 
+var client db.Database
+
 var (
 	INVALID_FORM_FIELD       = errors.New("invalid field in form")
 	EMPTY_FORM               = errors.New("empty form")
@@ -78,7 +80,7 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 			continue // safety measure TODO figure this out
 		}
 		defer f.Close()
-		_, err = db.AddFile(req.Context(), f, tags)
+		_, err = client.AddFile(req.Context(), f, tags)
 		if err != nil {
 			log.Println("failed to write file to database", err)
 			continue // TODO there should be some failure mode here
@@ -149,7 +151,7 @@ func editreqLogic(req *http.Request) (string, []string, []string, error) {
 		return resourceId, nil, nil, EMPTY_FORM
 	}
 
-	if err := db.ChangeTags(req.Context(), addtags, deltags, resourceId); err != nil {
+	if err := client.ChangeTags(req.Context(), addtags, deltags, resourceId); err != nil {
 		err = _error.ErrorWithContext{
 			Original: err,
 			Message:  "database failure on changetags",
@@ -203,7 +205,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 	ust := req.Context().Value(model.CtxkeyUserSettings(0)).(model.UserSettings)
 	idstr, ok := req.URL.Query()["id"]
 	if ok {
-		rsrc, err := db.GetFile(req.Context(), idstr[0])
+		rsrc, err := client.GetFile(req.Context(), idstr[0])
 		err = templates.ExecuteTemplate(
 			res,
 			"view.gohtml",
@@ -258,7 +260,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 	// Adds all user default exclusions that are not specifically included
 	extag.Union(*ust.View.DefaultExcludes.Duplicate().Difference(intag))
 	query := model.Query{Include: intag, Exclude: extag, Offset: index - 1, Limit: 1}
-	rsrcs, err := db.TagQuery(req.Context(), query)
+	rsrcs, err := client.TagQuery(req.Context(), query)
 	if err != nil {
 		res.WriteHeader(500)
 		log.Println("err with viewPage db TagQuery", err)
@@ -343,8 +345,9 @@ func settingsPage(res http.ResponseWriter, req *http.Request) {
 
 func servefile(res http.ResponseWriter, req *http.Request) {
 	id := req.URL.Path[len("/files/"):]
-	bts, err := db.GetBytes(req.Context(), id)
+	bts, err := client.GetBytes(req.Context(), id)
 	if err != nil {
+		log.Println(err)
 		http.Error(res, "Server error", 500)
 		return
 	}
@@ -398,12 +401,12 @@ func main() {
 	}).ParseGlob("./templates/*.gohtml"))
 
 	// Load database connection
-	var dbclose func()
-	ctx, dbclose, err := db.ConnectDatabases(ctx)
+	dbc, err := db.ConnectDatabases(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer dbclose()
+	defer dbc.Close(ctx)
+	client = dbc
 
 	server := http.NewServeMux()
 
