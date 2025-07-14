@@ -1,0 +1,45 @@
+services:
+  cassandra:
+    image: cassandra:5.0
+    container_name: cassandra
+    environment:
+      - CASSANDRA_CLUSTER_NAME=janusgraph
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_RACK=rack1
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - MAX_HEAP_SIZE=2G
+      - HEAP_NEWSIZE=512M
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    ports:
+      - "9042:9042" # CQL
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - janusgraphnet
+
+  janusgraph:
+    image: janusgraph/janusgraph:latest
+    container_name: janusgraph
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    environment:
+      - JANUS_PROPS_FILE=/etc/janusgraph/janusgraph-cql-es-server.properties
+      #- JAVA_OPTS=-Xms1g -Xmx2g
+    ports:
+      - "8182:8182" # Gremlin Server port
+    volumes:
+      - ./janusgraph-cql-server.properties:/etc/janusgraph/janusgraph-cql-es-server.properties
+    networks:
+      - janusgraphnet
+
+volumes:
+  cassandra_data:
+
+networks:
+  janusgraphnet:
+    driver: bridge

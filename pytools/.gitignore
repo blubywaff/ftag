@@ -1,5 +1,0 @@
-venv/
-exports/
-__pycache__/
-# export artifact
-*.tar.gz

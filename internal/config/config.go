@@ -7,12 +7,12 @@ import (
 	"os"
 )
 
-type Config_SQL struct {
+type Config_Gremlin struct {
 	Url string
 }
 
 type Config struct {
-	SQL     Config_SQL
+	Gremlin Config_Gremlin
 	UrlBase string
 }
 
