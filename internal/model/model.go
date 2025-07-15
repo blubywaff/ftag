@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	_error "github.com/blubywaff/ftag/internal/error"
+	apperror "github.com/blubywaff/ftag/internal/error"
 )
 
 type Resource struct {
@@ -194,16 +194,16 @@ func (ust *UserSettings) FromCookieString(s string) error {
 	bts = bts[:n]
 	if err != nil {
 		ust.View = DefaultUserSettings.View
-		return _error.ErrorWithContext{Original: err, Message: "base64 encoding error on ust"}
+		return apperror.ErrorWithContext{Original: err, Message: "base64 encoding error on ust"}
 	}
 	err = json.Unmarshal(bts, ust)
 	if err != nil {
 		ust.View = DefaultUserSettings.View
-		return _error.ErrorWithContext{Original: err, Message: "json unmarshal error on ust"}
+		return apperror.ErrorWithContext{Original: err, Message: "json unmarshal error on ust"}
 	}
 	if err := ust.Verify(); err != nil {
 		ust.View = DefaultUserSettings.View
-		return _error.ErrorWithContext{Original: err, Message: "could not verify ust on decode"}
+		return apperror.ErrorWithContext{Original: err, Message: "could not verify ust on decode"}
 	}
 	return nil
 }
@@ -211,11 +211,11 @@ func (ust *UserSettings) FromCookieString(s string) error {
 func (ust *UserSettings) ToCookieString() (string, error) {
 	if err := ust.Verify(); err != nil {
 		ust.View = DefaultUserSettings.View
-		return "", _error.ErrorWithContext{Original: err, Message: "could not verify ust on encode:"}
+		return "", apperror.ErrorWithContext{Original: err, Message: "could not verify ust on encode:"}
 	}
 	bts, err := json.Marshal(ust)
 	if err != nil {
-		return "", _error.ErrorWithContext{Original: err, Message: "json unmarshal error on ust:"}
+		return "", apperror.ErrorWithContext{Original: err, Message: "json unmarshal error on ust:"}
 	}
 	dst := make([]byte, base64.StdEncoding.EncodedLen(len(bts)))
 	base64.StdEncoding.Encode(dst, bts)

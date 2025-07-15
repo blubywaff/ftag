@@ -201,7 +201,7 @@ func (t *Tinkerpop) AddFile(ctx context.Context, f io.Reader, tags model.TagSet)
 }
 
 // Returns id, mimetype, canceller
-func writeFileReversible(f io.Reader) (string, string, _error.IntermediateResult) {
+func writeFileReversible(f io.Reader) (string, string, apperror.IntermediateResult) {
 	hasFailed := false
 	doFail := func() { hasFailed = true }
 
@@ -210,23 +210,23 @@ func writeFileReversible(f io.Reader) (string, string, _error.IntermediateResult
 	n, err := f.Read(bts)
 	if n == 0 {
 		doFail()
-		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "empty read for mime type"})
+		return "", "", apperror.IntermediateResultFromError(apperror.ErrorWithContext{Original: err, Message: "empty read for mime type"})
 	}
 	if err != nil && err != io.EOF {
 		doFail()
-		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "failed to read for mime type"})
+		return "", "", apperror.IntermediateResultFromError(apperror.ErrorWithContext{Original: err, Message: "failed to read for mime type"})
 	}
 	mimetype := http.DetectContentType(bts)
 
 	id, err := GenUUID()
 	if err != nil {
-		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "could not create uuid"})
+		return "", "", apperror.IntermediateResultFromError(apperror.ErrorWithContext{Original: err, Message: "could not create uuid"})
 	}
 
 	file, err := os.OpenFile("files/"+id, os.O_WRONLY|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		doFail()
-		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "could not create file"})
+		return "", "", apperror.IntermediateResultFromError(apperror.ErrorWithContext{Original: err, Message: "could not create file"})
 	}
 	defer func(_id string) {
 		if err := file.Close(); err != nil {
@@ -243,14 +243,14 @@ func writeFileReversible(f io.Reader) (string, string, _error.IntermediateResult
 
 	_, err = io.Copy(file, bytes.NewReader(bts))
 	if err != nil {
-		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "failed on peek copy"})
+		return "", "", apperror.IntermediateResultFromError(apperror.ErrorWithContext{Original: err, Message: "failed on peek copy"})
 	}
 	_, err = io.Copy(file, f)
 	if err != nil {
-		return "", "", _error.IntermediateResultFromError(_error.ErrorWithContext{Original: err, Message: "failed on full copy"})
+		return "", "", apperror.IntermediateResultFromError(apperror.ErrorWithContext{Original: err, Message: "failed on full copy"})
 	}
 
-	return id, mimetype, _error.IntermediateResult{
+	return id, mimetype, apperror.IntermediateResult{
 		Cleanup: func() error {
 			if err := os.Remove(file.Name()); err != nil {
 				log.Println("could not delete on fail: " + id)

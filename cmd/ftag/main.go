@@ -94,7 +94,7 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 func editreqLogic(req *http.Request) (string, []string, []string, error) {
 	formReader, err := req.MultipartReader()
 	if err != nil {
-		err = _error.ErrorWithContext{
+		err = apperror.ErrorWithContext{
 			Original: err,
 			Message:  "could not open multipart reader",
 		}
@@ -110,7 +110,7 @@ func editreqLogic(req *http.Request) (string, []string, []string, error) {
 			break
 		}
 		if err != nil {
-			err = _error.ErrorWithContext{
+			err = apperror.ErrorWithContext{
 				Original: err,
 				Message:  "failed on form part",
 			}
@@ -152,7 +152,7 @@ func editreqLogic(req *http.Request) (string, []string, []string, error) {
 	}
 
 	if err := client.ChangeTags(req.Context(), addtags, deltags, resourceId); err != nil {
-		err = _error.ErrorWithContext{
+		err = apperror.ErrorWithContext{
 			Original: err,
 			Message:  "database failure on changetags",
 		}
@@ -165,7 +165,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 	if req.Method == "POST" {
 		_, _, _, err := editreqLogic(req)
 		if err != nil {
-			log.Print(_error.ErrorWithContext{
+			log.Print(apperror.ErrorWithContext{
 				Original: err,
 				Message:  "failure of editreqlogic for view page",
 			})

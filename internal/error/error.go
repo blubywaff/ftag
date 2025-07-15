@@ -1,4 +1,4 @@
-package _error
+package apperror
 
 import "errors"
 
