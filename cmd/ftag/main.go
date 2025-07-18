@@ -3,20 +3,30 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/blubywaff/ftag/internal/config"
 	"github.com/blubywaff/ftag/internal/db"
 	"github.com/blubywaff/ftag/internal/error"
 	"github.com/blubywaff/ftag/internal/model"
 )
+
+type AppConfig struct {
+    MetaStore json.RawMessage
+    FileStore json.RawMessage
+	UrlBase string
+}
+
+var config AppConfig
 
 var templates *template.Template
 
@@ -391,12 +401,28 @@ func main() {
 	var ctx = context.Background()
 
 	// Load config
-	config.Load()
+	var (
+		cleanupFlag    = flag.Bool("clean", false, "If the database should be cleaned on startup.")
+		configPathFlag = flag.String("config", "ftag.config.json", "The location of the config file.")
+	)
+
+	flag.Parse()
+
+	if *cleanupFlag {
+		log.Fatal("Feature Not Supported")
+	}
+
+	// Parse Config
+	bts, err := os.ReadFile(*configPathFlag)
+	if err != nil {
+		log.Fatal("failed to read config:", err)
+	}
+	json.Unmarshal(bts, &config)
 
 	// Load Templates
 	templates = template.Must(template.New("").Funcs(map[string]any{
 		"hasPrefix":   strings.HasPrefix,
-		"getBaseUrl":  func() string { return config.Global.UrlBase },
+		"getBaseUrl":  func() string { return config.UrlBase },
 		"stringifyTS": func(ts model.TagSet) string { return ts.String() },
 	}).ParseGlob("./templates/*.gohtml"))
 

@@ -59,7 +59,6 @@ var from = gremlingo.Direction.From
 var to = gremlingo.Direction.To
 var desc = gremlingo.Order.Desc
 var asc = gremlingo.Order.Asc
-var NO_RESULT error = errors.New("database no result")
 
 type Database interface {
 	// returns the id of the newly added file
