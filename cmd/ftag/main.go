@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"html/template"
 	"io"
@@ -27,6 +28,20 @@ var (
 	EMPTY_FORM               = errors.New("empty form")
 	MISSING_FORM_REQUIREMENT = errors.New("required form field not present")
 )
+
+func writeJson[T any](res http.ResponseWriter, value T) {
+	bts, err := json.Marshal(value)
+	if err != nil {
+		res.WriteHeader(500)
+		log.Println("error with marshaling", err)
+		return
+	}
+	_, err = res.Write(bts)
+	if err != nil {
+		res.WriteHeader(500)
+		log.Println("error with view.gohtml", err)
+	}
+}
 
 func landingPage(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(200)
@@ -161,72 +176,25 @@ func editreqLogic(req *http.Request) (string, []string, []string, error) {
 	return resourceId, failedAdd, failedDel, nil
 }
 
-func viewPage(res http.ResponseWriter, req *http.Request) {
-	if req.Method == "POST" {
-		_, _, _, err := editreqLogic(req)
-		if err != nil {
-			log.Print(apperror.ErrorWithContext{
-				Original: err,
-				Message:  "failure of editreqlogic for view page",
-			})
-			res.WriteHeader(500)
-			return
-		}
-		res.Header().Add("location", config.Global.UrlBase+req.URL.RequestURI())
-		res.WriteHeader(303)
-		return
-	}
+func query(res http.ResponseWriter, req *http.Request) {
 	if req.Method != "GET" {
 		res.WriteHeader(405)
 		return
 	}
 	if !strings.Contains(req.URL.String(), "?") {
-		err := templates.ExecuteTemplate(
-			res,
-			"view.gohtml",
-			struct {
-				Render   string
-				PageMeta model.PageMeta
-				Resource interface{}
-			}{
-				"empty",
-				model.PageMeta{
-					Title: "Viewer",
-				},
-				nil,
-			},
-		)
-		if err != nil {
-			res.WriteHeader(500)
-			log.Println("error with view.gohtml", err)
-		}
+		res.WriteHeader(400)
 		return
 	}
 	ust := req.Context().Value(model.CtxkeyUserSettings(0)).(model.UserSettings)
 	idstr, ok := req.URL.Query()["id"]
 	if ok {
 		rsrc, err := client.GetFile(req.Context(), idstr[0])
-		err = templates.ExecuteTemplate(
-			res,
-			"view.gohtml",
-			struct {
-				Render       string
-				PageMeta     model.PageMeta
-				Resource     interface{}
-				UserSettings model.UserSettings
-			}{
-				"id",
-				model.PageMeta{
-					Title: "Viewer",
-				},
-				rsrc,
-				ust,
-			},
-		)
+		// TODO id doesn't exist
 		if err != nil {
 			res.WriteHeader(500)
-			log.Println("error with view.gohtml", err)
+			log.Println("error finding resource", err)
 		}
+		writeJson(res, rsrc)
 		return
 	}
 	var intag, extag model.TagSet
@@ -274,31 +242,7 @@ func viewPage(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "exceed list end", 400)
 		return
 	}
-	err = templates.ExecuteTemplate(
-		res,
-		"view.gohtml",
-		struct {
-			Render       string
-			PageMeta     model.PageMeta
-			Resource     model.Resource
-			PrevLink     string
-			NextLink     string
-			UserSettings model.UserSettings
-		}{
-			"query",
-			model.PageMeta{
-				Title: "Viewing " + rsrcs[0].Id,
-			},
-			rsrcs[0],
-			config.Global.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index-1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0],
-			config.Global.UrlBase + req.URL.Path + "?number=" + strconv.Itoa(index+1) + "&intags=" + intagstr[0] + "&extags=" + extagstr[0],
-			ust,
-		},
-	)
-	if err != nil {
-		res.WriteHeader(500)
-		log.Println("error with view.gohtml", err)
-	}
+	writeJson(res, rsrcs)
 }
 
 func settingsPage(res http.ResponseWriter, req *http.Request) {
@@ -352,7 +296,6 @@ func servefile(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	res.Write(bts)
-	return
 }
 
 func debugMiddleWare(prefix string, next http.Handler) http.Handler {
@@ -416,7 +359,7 @@ func main() {
 	server.Handle("/public/", http.StripPrefix("/public/", statfs))
 	server.HandleFunc("/files/", servefile)
 	server.HandleFunc("/site/upload", multiuploadPage)
-	server.HandleFunc("/site/view", viewPage)
+	server.HandleFunc("/api/query", query)
 	server.HandleFunc("/site/settings", settingsPage)
 
 	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, attachUserSettings(http.StripPrefix(config.Global.UrlBase, server)))))
