@@ -32,7 +32,7 @@ func (ts *TagSet) String() string {
 	return sb.String()
 }
 
-func (ts *TagSet) MarshalJSON() ([]byte, error) {
+func (ts TagSet) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ts.Inner)
 }
 

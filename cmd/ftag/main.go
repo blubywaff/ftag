@@ -186,17 +186,6 @@ func query(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	ust := req.Context().Value(model.CtxkeyUserSettings(0)).(model.UserSettings)
-	idstr, ok := req.URL.Query()["id"]
-	if ok {
-		rsrc, err := client.GetFile(req.Context(), idstr[0])
-		// TODO id doesn't exist
-		if err != nil {
-			res.WriteHeader(500)
-			log.Println("error finding resource", err)
-		}
-		writeJson(res, rsrc)
-		return
-	}
 	var intag, extag model.TagSet
 	var index int
 	intagstr, ok := req.URL.Query()["intags"]
@@ -243,6 +232,29 @@ func query(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJson(res, rsrcs)
+}
+
+func resource(res http.ResponseWriter, req *http.Request) {
+	if req.Method != "GET" {
+		res.WriteHeader(405)
+		return
+	}
+	if !strings.Contains(req.URL.String(), "?") {
+		res.WriteHeader(400)
+		return
+	}
+	idstr, ok := req.URL.Query()["id"]
+	if !ok {
+		res.WriteHeader(400)
+		return
+	}
+	rsrc, err := client.GetFile(req.Context(), idstr[0])
+	// TODO id doesn't exist
+	if err != nil {
+		res.WriteHeader(500)
+		log.Println("error finding resource", err)
+	}
+	writeJson(res, rsrc)
 }
 
 func settingsPage(res http.ResponseWriter, req *http.Request) {
@@ -360,6 +372,7 @@ func main() {
 	server.HandleFunc("/files/", servefile)
 	server.HandleFunc("/site/upload", multiuploadPage)
 	server.HandleFunc("/api/query", query)
+	server.HandleFunc("/api/resource", resource)
 	server.HandleFunc("/site/settings", settingsPage)
 
 	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, attachUserSettings(http.StripPrefix(config.Global.UrlBase, server)))))
