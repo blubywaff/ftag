@@ -31,7 +31,7 @@
 
 {#if view.resource !== null}
 	<div class="flex h-screen flex-col">
-		<Viewer resource={view.resource} />
+		<Viewer bind:resource={view.resource} />
 	</div>
 {:else}
 	<p>Resource not found.</p>

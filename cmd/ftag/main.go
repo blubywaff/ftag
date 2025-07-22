@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"html/template"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -15,7 +13,6 @@ import (
 
 	"github.com/blubywaff/ftag/internal/config"
 	"github.com/blubywaff/ftag/internal/db"
-	"github.com/blubywaff/ftag/internal/error"
 	"github.com/blubywaff/ftag/internal/model"
 )
 
@@ -28,6 +25,12 @@ var (
 	EMPTY_FORM               = errors.New("empty form")
 	MISSING_FORM_REQUIREMENT = errors.New("required form field not present")
 )
+
+type TagChange struct {
+	AddTags    string
+	DelTags    string
+	ResourceId string
+}
 
 func writeJson[T any](res http.ResponseWriter, value T) {
 	bts, err := json.Marshal(value)
@@ -104,76 +107,6 @@ func multiuploadPage(res http.ResponseWriter, req *http.Request) {
 
 	res.Header().Add("location", config.Global.UrlBase+"/site/view")
 	res.WriteHeader(303)
-}
-
-func editreqLogic(req *http.Request) (string, []string, []string, error) {
-	formReader, err := req.MultipartReader()
-	if err != nil {
-		err = apperror.ErrorWithContext{
-			Original: err,
-			Message:  "could not open multipart reader",
-		}
-		log.Println(err)
-		return "", nil, nil, err
-	}
-	var addtags, deltags model.TagSet
-	var failedAdd, failedDel []string
-	var resourceId string
-	for {
-		part, err := formReader.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			err = apperror.ErrorWithContext{
-				Original: err,
-				Message:  "failed on form part",
-			}
-			return "", nil, nil, err
-		}
-		switch part.FormName() {
-		case "addtags":
-			buf := new(bytes.Buffer)
-			buf.ReadFrom(part)
-			if buf.Len() == 0 {
-				continue
-			}
-			failedAdd = addtags.FillFromString(buf.String())
-		case "deltags":
-			buf := new(bytes.Buffer)
-			buf.ReadFrom(part)
-			if buf.Len() == 0 {
-				continue
-			}
-			failedDel = deltags.FillFromString(buf.String())
-		case "resourceid":
-			buf := new(bytes.Buffer)
-			buf.ReadFrom(part)
-			if buf.Len() == 0 {
-				continue
-			}
-			resourceId = buf.String()
-		default:
-			return "", nil, nil, INVALID_FORM_FIELD
-		}
-	}
-
-	if resourceId == "" {
-		return "", nil, nil, MISSING_FORM_REQUIREMENT
-	}
-
-	if addtags.Len() == 0 && deltags.Len() == 0 && len(failedAdd) == 0 && len(failedDel) == 0 {
-		return resourceId, nil, nil, EMPTY_FORM
-	}
-
-	if err := client.ChangeTags(req.Context(), addtags, deltags, resourceId); err != nil {
-		err = apperror.ErrorWithContext{
-			Original: err,
-			Message:  "database failure on changetags",
-		}
-		return resourceId, failedAdd, failedDel, err
-	}
-	return resourceId, failedAdd, failedDel, nil
 }
 
 func query(res http.ResponseWriter, req *http.Request) {
@@ -255,6 +188,34 @@ func resource(res http.ResponseWriter, req *http.Request) {
 		log.Println("error finding resource", err)
 	}
 	writeJson(res, rsrc)
+}
+
+func resourceTags(res http.ResponseWriter, req *http.Request) {
+	if req.Method != "POST" {
+		res.WriteHeader(405)
+		return
+	}
+	var tc TagChange
+	dec := json.NewDecoder(req.Body)
+	err := dec.Decode(&tc)
+	if err != nil {
+		res.WriteHeader(400)
+		return
+	}
+	var addtags, deltags model.TagSet
+	addtags.FillFromString(tc.AddTags)
+	deltags.FillFromString(tc.DelTags)
+	err = client.ChangeTags(req.Context(), addtags, deltags, tc.ResourceId)
+	if err != nil {
+		res.WriteHeader(500)
+		return
+	}
+	rsc, err := client.GetFile(req.Context(), tc.ResourceId)
+	if err != nil {
+		res.WriteHeader(500)
+		return
+	}
+	writeJson(res, rsc)
 }
 
 func settingsPage(res http.ResponseWriter, req *http.Request) {
@@ -373,6 +334,7 @@ func main() {
 	server.HandleFunc("/site/upload", multiuploadPage)
 	server.HandleFunc("/api/query", query)
 	server.HandleFunc("/api/resource", resource)
+	server.HandleFunc("/api/resource/tags", resourceTags)
 	server.HandleFunc("/site/settings", settingsPage)
 
 	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, attachUserSettings(http.StripPrefix(config.Global.UrlBase, server)))))

@@ -4,3 +4,9 @@ export interface Resource {
 	CreatedAt: string;
 	Tags: string[];
 }
+export const DefaultResource = {
+	Id: '',
+	Mimetype: '',
+	CreatedAt: '',
+	Tags: []
+};

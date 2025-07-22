@@ -24,9 +24,7 @@
 		number: 1
 	});
 
-	let view: View = $state({
-		resource: null
-	});
+	let view: View = $derived({ resource: query.resources[0] });
 
 	async function updateView() {
 		if (!query.prepared) {
@@ -42,7 +40,6 @@
 		let rsrc = await res.json();
 
 		query.resources = rsrc;
-		view.resource = query.resources[0];
 	}
 
 	onMount(async () => {
@@ -87,12 +84,11 @@
 				class="">Next</button
 			>
 		</div>
-		<Viewer resource={view.resource} />
+		<Viewer bind:resource={query.resources[0]} />
 	</div>
 {/if}
 <div class="mt-6 flex w-full justify-center">
 	<form method="get" class="w-full max-w-md rounded-2xl bg-gray-600 p-6 text-gray-50">
-		<input hidden name="number" min="1" max="10000" bind:value={query.number} />
 		<div class="mb-6 items-center sm:flex">
 			<div class="sm:w-1/4">
 				<label for="form-intags" class="mb-1 block pr-4 font-bold sm:mb-0 sm:text-right"
