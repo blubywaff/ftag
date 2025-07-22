@@ -13,10 +13,6 @@
 		number: number;
 	}
 
-	interface View {
-		resource: Resource | null;
-	}
-
 	let query: Query = $state({
 		prepared: false,
 		resources: [],
@@ -24,8 +20,6 @@
 		extags: '',
 		number: 1
 	});
-
-	let view: View = $derived({ resource: query.resources[0] });
 
 	async function updateView() {
 		if (!query.prepared) {
@@ -68,7 +62,7 @@
 	}
 </script>
 
-{#if view.resource !== null}
+{#if query.prepared}
 	<div class="flex h-screen flex-col">
 		<div class="flex flex-row justify-around gap-x-4 bg-gray-500">
 			<button
