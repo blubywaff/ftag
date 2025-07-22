@@ -39,6 +39,7 @@ func writeJson[T any](res http.ResponseWriter, value T) {
 		log.Println("error with marshaling", err)
 		return
 	}
+	res.Header().Add("Content-Type", "application/json")
 	_, err = res.Write(bts)
 	if err != nil {
 		res.WriteHeader(500)
@@ -162,6 +163,45 @@ func resourceTags(res http.ResponseWriter, req *http.Request) {
 	writeJson(res, rsc)
 }
 
+func upload(res http.ResponseWriter, req *http.Request) {
+	if req.Method != "POST" {
+		res.WriteHeader(405)
+		return
+	}
+	// 1024 megabytes
+	// consider using maltipart reader to avoid reading oversized uploads
+	err := req.ParseMultipartForm(1 << 30)
+	if err != nil {
+		res.WriteHeader(500)
+		log.Println("error with multipart form upload")
+		return
+	}
+
+	var tags model.TagSet
+	badtags := tags.FillFromString(req.FormValue("tags"))
+	if len(badtags) != 0 {
+		http.Error(res, "Some tags were invalid, multiupload aborted.", 400)
+		return
+	}
+
+	fhs := req.MultipartForm.File["uploadfile"]
+	for _, fh := range fhs {
+		f, err := fh.Open()
+		if err != nil {
+			log.Println("failed to open file from fileheader", err)
+			continue // safety measure TODO figure this out
+		}
+		defer f.Close()
+		_, err = client.AddFile(req.Context(), f, tags)
+		if err != nil {
+			log.Println("failed to write file to database", err)
+			continue // TODO there should be some failure mode here
+		}
+	}
+
+	res.WriteHeader(201)
+}
+
 func servefile(res http.ResponseWriter, req *http.Request) {
 	id := req.URL.Path[len("/files/"):]
 	bts, err := client.GetBytes(req.Context(), id)
@@ -218,6 +258,7 @@ func main() {
 	server.HandleFunc("/api/query", query)
 	server.HandleFunc("/api/resource", resource)
 	server.HandleFunc("/api/resource/tags", resourceTags)
+	server.HandleFunc("/api/upload", upload)
 
 	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, http.StripPrefix(config.Global.UrlBase, server))))
 }
