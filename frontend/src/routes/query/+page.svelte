@@ -3,6 +3,7 @@
 	import Viewer from '$lib/Viewer.svelte';
 	import { onMount } from 'svelte';
 	import type { Resource } from '$lib/types';
+	import { settings } from '$lib/settings.svelte';
 
 	interface Query {
 		prepared: boolean;
@@ -34,6 +35,7 @@
 		let url = new URL(`${location.origin}/api/query`);
 		url.searchParams.append('intags', query.intags);
 		url.searchParams.append('extags', query.extags);
+		url.searchParams.append('userex', settings.defaultExcludes);
 		url.searchParams.append('number', '' + query.number);
 
 		let res = await fetch(url);

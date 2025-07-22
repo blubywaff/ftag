@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Edit from './Edit.svelte';
 	import type { Resource } from './types';
+	import { showTags, showTagEdit } from '$lib/settings.svelte';
 
 	interface Props {
 		resource: Resource;
@@ -10,7 +11,7 @@
 </script>
 
 {#if resource}
-	<details open class="">
+	<details open={showTags()} class="">
 		<summary class="">
 			<span class="font-bold">Tags</span>
 		</summary>
@@ -22,7 +23,7 @@
 					{tag}
 				</p>
 			{/each}
-			<details class="flex justify-center" open>
+			<details class="flex justify-center" open={showTagEdit()}>
 				<summary>
 					<span class="font-bold">Edit</span>
 				</summary>
