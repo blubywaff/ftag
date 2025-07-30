@@ -4,10 +4,10 @@ services:
     container_name: cassandra
     environment:
       - CASSANDRA_CLUSTER_NAME=janusgraph
-      - CASSANDRA_DC=dc1
+      - CASSANDRA_DC=datacenter1
       - CASSANDRA_RACK=rack1
       - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
-      - MAX_HEAP_SIZE=2G
+      - MAX_HEAP_SIZE=8G
       - HEAP_NEWSIZE=512M
     volumes:
       - cassandra_data:/var/lib/cassandra
@@ -28,12 +28,13 @@ services:
       cassandra:
         condition: service_healthy
     environment:
-      - JANUS_PROPS_FILE=/etc/janusgraph/janusgraph-cql-es-server.properties
+      - JANUS_PROPS_TEMPLATE=ftag
       #- JAVA_OPTS=-Xms1g -Xmx2g
     ports:
       - "8182:8182" # Gremlin Server port
     volumes:
-      - ./janusgraph-cql-server.properties:/etc/janusgraph/janusgraph-cql-es-server.properties
+      - ./janusgraph-cql-server.properties:/opt/janusgraph/conf/janusgraph-ftag-server.properties
+      # - ./janusgraph-cql-server.properties:/opt/janusgraph/janusgraph-server.properties
     networks:
       - janusgraphnet
 

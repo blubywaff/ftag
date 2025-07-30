@@ -12,40 +12,40 @@ import (
 type Database = backend.MetaStore
 
 type Config struct {
-    FileStoreType string
-    MetaStoreType string
-    FileStoreConfig json.RawMessage
-    MetaStoreConfig json.RawMessage
+	FileStoreType   string
+	MetaStoreType   string
+	FileStoreConfig json.RawMessage
+	MetaStoreConfig json.RawMessage
 }
 
-func Setup (config Config) (Database, error) {
-    var fs backend.FileStore
-    var ms backend.MetaStore
-    var err error
-    switch (config.FileStoreType) {
-    case "filesystem":
-        var conf filesystem.Config
-        err = json.Unmarshal(config.FileStoreConfig, &conf)
-        if err != nil {
-            return nil, err
-        }
-        fs, err = filesystem.New(conf)
-        if err != nil {
-            return nil, err
-        }
-    default:
-        return nil, errors.New("invalid FileStore type")
-    }
-    switch (config.MetaStoreType) {
-    case "gremlin":
-        var conf gremlin.Config
-        err = json.Unmarshal(config.MetaStoreConfig, &conf)
-        if err != nil {
-            return nil, err
-        }
-        ms, err = gremlin.New(conf, fs)
-    default:
-        return nil, errors.New("invalid MetaStore type")
-    }
-    return ms, nil
+func Setup(config Config) (Database, error) {
+	var fs backend.FileStore
+	var ms backend.MetaStore
+	var err error
+	switch config.FileStoreType {
+	case "filesystem":
+		var conf filesystem.Config
+		err = json.Unmarshal(config.FileStoreConfig, &conf)
+		if err != nil {
+			return nil, err
+		}
+		fs, err = filesystem.New(conf)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("invalid FileStore type")
+	}
+	switch config.MetaStoreType {
+	case "gremlin":
+		var conf gremlin.Config
+		err = json.Unmarshal(config.MetaStoreConfig, &conf)
+		if err != nil {
+			return nil, err
+		}
+		ms, err = gremlin.New(conf, fs)
+	default:
+		return nil, errors.New("invalid MetaStore type")
+	}
+	return ms, nil
 }

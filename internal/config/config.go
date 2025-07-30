@@ -8,5 +8,5 @@ import (
 )
 
 type Configurable interface {
-    Config() *interface{}
+	Config() *interface{}
 }

@@ -1,5 +1,8 @@
-npx tailwindcss@v3.4 -i web/style.css -o dist/style.css
+cd frontend
+npx prettier --write src/
+npx eslint
+npm run build
+cd ..
 gofmt -w {cmd,internal}/**/*.go
 rm ftag
 CGO_ENABLED=0 go build ./cmd/ftag/
-cp -r web/scripts dist/scripts

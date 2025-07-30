@@ -1,3 +1,4 @@
+import shutil
 from gremlin_python.process.anonymous_traversal import traversal
 from gremlin_python.process.graph_traversal import  __
 from gremlin_python.driver.driver_remote_connection import DriverRemoteConnection
@@ -7,6 +8,7 @@ import json
 def main():
     gremlin_url = ''  # 'ws://localhost:8182/gremlin'
     prefix = '.'
+    files = ''
     g = traversal().with_remote(DriverRemoteConnection(gremlin_url,'g'))
     with open(f"{prefix}/export.json", 'r', encoding='utf-8') as f:
         resources = json.load(f)
@@ -50,7 +52,16 @@ def main():
         print(f"progress: tagmap (3/3) : {idx} / {len(tagmap)}")
     print(f"progress: tagmap (3/3)")
 
-
+    print(f"progress: copy files (0/{len(resources)})")
+    for i, r in enumerate(resources):
+        if i % 5 == 0:
+            print(".", end="", flush=True)
+        if i % 100 == 0:
+            print(f"progress: copy files ({i}/{len(resources)})")
+        in_file = f"{prefix}/{r['id']}.{r['mime'].split('/')[-1]}"
+        out_file = f"{files}/{r['id']}"
+        shutil.copy(in_file, out_file)
+    print(f"progress: copy files ({len(resources)})")
 
 
 if __name__ == "__main__":

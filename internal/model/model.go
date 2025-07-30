@@ -1,13 +1,10 @@
 package model
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
 	"time"
-
-	apperror "github.com/blubywaff/ftag/internal/error"
 )
 
 type Resource struct {
@@ -32,7 +29,7 @@ func (ts *TagSet) String() string {
 	return sb.String()
 }
 
-func (ts *TagSet) MarshalJSON() ([]byte, error) {
+func (ts TagSet) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ts.Inner)
 }
 
@@ -167,73 +164,6 @@ func (ts *TagSet) FromSlice(sstr []string) error {
 	}
 	ts.Inner = sstr
 	return nil
-}
-
-type PageMeta struct {
-	Title string
-}
-
-type UserSettings_View struct {
-	DefaultExcludes TagSet
-	// valid values are "edit", "view", or "none"
-	TagVisibility string
-}
-
-type UserSettings struct {
-	View UserSettings_View
-}
-
-type CtxkeyUserSettings int
-
-// / Will always leave the settings in a good state
-// / If s is invalid, returns error and sets to default settings
-func (ust *UserSettings) FromCookieString(s string) error {
-	src := []byte(s)
-	bts := make([]byte, base64.StdEncoding.DecodedLen(len(src)))
-	n, err := base64.StdEncoding.Decode(bts, src)
-	bts = bts[:n]
-	if err != nil {
-		ust.View = DefaultUserSettings.View
-		return apperror.ErrorWithContext{Original: err, Message: "base64 encoding error on ust"}
-	}
-	err = json.Unmarshal(bts, ust)
-	if err != nil {
-		ust.View = DefaultUserSettings.View
-		return apperror.ErrorWithContext{Original: err, Message: "json unmarshal error on ust"}
-	}
-	if err := ust.Verify(); err != nil {
-		ust.View = DefaultUserSettings.View
-		return apperror.ErrorWithContext{Original: err, Message: "could not verify ust on decode"}
-	}
-	return nil
-}
-
-func (ust *UserSettings) ToCookieString() (string, error) {
-	if err := ust.Verify(); err != nil {
-		ust.View = DefaultUserSettings.View
-		return "", apperror.ErrorWithContext{Original: err, Message: "could not verify ust on encode:"}
-	}
-	bts, err := json.Marshal(ust)
-	if err != nil {
-		return "", apperror.ErrorWithContext{Original: err, Message: "json unmarshal error on ust:"}
-	}
-	dst := make([]byte, base64.StdEncoding.EncodedLen(len(bts)))
-	base64.StdEncoding.Encode(dst, bts)
-	return string(dst), nil
-}
-
-func (ust *UserSettings) Verify() error {
-	if a := ust.View.TagVisibility; a != "edit" && a != "view" && a != "none" {
-		return errors.New("invalid value for View.TagVisibility")
-	}
-	return nil
-}
-
-var DefaultUserSettings UserSettings = UserSettings{
-	UserSettings_View{
-		TagSet{},
-		"view",
-	},
 }
 
 type Query struct {
