@@ -13,21 +13,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blubywaff/ftag/internal/db"
+	"github.com/blubywaff/ftag/internal/data"
 	"github.com/blubywaff/ftag/internal/model"
 )
 
 type AppConfig struct {
-	MetaStore json.RawMessage
-	FileStore json.RawMessage
-	UrlBase   string
+	Database data.Config
+	UrlBase  string
 }
 
 var config AppConfig
 
 var templates *template.Template
 
-var client db.Database
+var client data.Database
 
 var (
 	INVALID_FORM_FIELD       = errors.New("invalid field in form")
@@ -201,7 +200,7 @@ func upload(res http.ResponseWriter, req *http.Request) {
 			continue // safety measure TODO figure this out
 		}
 		defer f.Close()
-		_, err = client.AddFile(req.Context(), f, tags)
+		_, err = client.AddResource(req.Context(), f, tags)
 		if err != nil {
 			log.Println("failed to write file to database", err)
 			continue // TODO there should be some failure mode here
@@ -213,13 +212,13 @@ func upload(res http.ResponseWriter, req *http.Request) {
 
 func servefile(res http.ResponseWriter, req *http.Request) {
 	id := req.URL.Path[len("/files/"):]
-	bts, err := client.GetBytes(req.Context(), id)
+	ior, err := client.GetFile(req.Context(), id)
 	if err != nil {
 		log.Println(err)
 		http.Error(res, "Server error", 500)
 		return
 	}
-	res.Write(bts)
+	io.Copy(res, ior)
 }
 
 func debugMiddleWare(prefix string, next http.Handler) http.Handler {
@@ -258,20 +257,16 @@ func main() {
 	}
 	json.Unmarshal(bts, &config)
 
-	// Load Templates
-	templates = template.Must(template.New("").Funcs(map[string]any{
-		"hasPrefix":   strings.HasPrefix,
-		"getBaseUrl":  func() string { return config.UrlBase },
-		"stringifyTS": func(ts model.TagSet) string { return ts.String() },
-	}).ParseGlob("./templates/*.gohtml"))
-
 	// Load database connection
-	dbc, err := db.ConnectDatabases(ctx)
+	client, err = data.Setup(config.Database)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer dbc.Close(ctx)
-	client = dbc
+	err = client.Connect(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close(ctx)
 
 	server := http.NewServeMux()
 
@@ -285,5 +280,5 @@ func main() {
 	server.HandleFunc("/api/resource/tags", resourceTags)
 	server.HandleFunc("/api/upload", upload)
 
-	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, http.StripPrefix(config.Global.UrlBase, server))))
+	log.Fatal(http.ListenAndServe(":8080", addContext(ctx, http.StripPrefix(config.UrlBase, server))))
 }

@@ -50,31 +50,31 @@ type TraversalSource struct {
 }
 
 func (s *TraversalSource) tx() (*gg.Transaction, *TraversalSource, error) {
-    tx := s.Tx()
-    ts, err := tx.Begin()
-    return tx, &TraversalSource{ts}, err
+	tx := s.Tx()
+	ts, err := tx.Begin()
+	return tx, &TraversalSource{ts}, err
 }
 
 func (s *TraversalSource) createResource(rsc model.Resource) *Traversal {
-    return &Traversal{
-        s.AddV("resource").
-        Property("rsc_id", rsc.Id).
-        Property("upload", rsc.CreatedAt).
-        Property("rsc_id", rsc.Mimetype),
-    }
+	return &Traversal{
+		s.AddV("resource").
+			Property("rsc_id", rsc.Id).
+			Property("upload", rsc.CreatedAt).
+			Property("rsc_id", rsc.Mimetype),
+	}
 }
 
 func (s *TraversalSource) tags() *Traversal {
-    return &Traversal{
-        s.V().HasLabel("tag"),
-    }
+	return &Traversal{
+		s.V().HasLabel("tag"),
+	}
 }
 
 func (s *TraversalSource) resources() *Traversal {
-    t := s.GetGraphTraversal()
-    return &Traversal{
-        t.V().HasLabel("resource"),
-    }
+	t := s.GetGraphTraversal()
+	return &Traversal{
+		t.V().HasLabel("resource"),
+	}
 }
 
 type Traversal struct {
@@ -82,76 +82,76 @@ type Traversal struct {
 }
 
 type iAnonymousTraversal interface {
-    gg.AnonymousTraversal
+	gg.AnonymousTraversal
 }
 
 type AnonymousTraversal struct {
-    gg.AnonymousTraversal
-    Traversal func() *Traversal
+	gg.AnonymousTraversal
+	Traversal func() *Traversal
 }
 
 var t_ iAnonymousTraversal = &AnonymousTraversal{
-    gg.T__,
-    func () *Traversal {
-        return &Traversal{
-            gg.NewGraphTraversal(nil, gg.NewBytecode(nil), nil),
-        }
-    },
+	gg.T__,
+	func() *Traversal {
+		return &Traversal{
+			gg.NewGraphTraversal(nil, gg.NewBytecode(nil), nil),
+		}
+	},
 }
 
 func (t *Traversal) withId(id string) *Traversal {
-    return &Traversal{
-        t.Where(gg.T__.Values("rsc_id").Is(gg.P.Eq(id))),
-    }
+	return &Traversal{
+		t.Where(gg.T__.Values("rsc_id").Is(gg.P.Eq(id))),
+	}
 }
 
 func (t *Traversal) withTags(tags model.TagSet) *Traversal {
-    return &Traversal{
-        t.Where(
-            gg.T__.In("describes").Values("name").
-            Is(gg.P.Within(ToInterfaceSlice(tags.Inner)...)).
-            Count().Is(gg.P.Eq(tags.Len())),
-        ),
-    }
+	return &Traversal{
+		t.Where(
+			gg.T__.In("describes").Values("name").
+				Is(gg.P.Within(ToInterfaceSlice(tags.Inner)...)).
+				Count().Is(gg.P.Eq(tags.Len())),
+		),
+	}
 }
 
 func (t *Traversal) withoutTags(tags model.TagSet) *Traversal {
-    return &Traversal{
-        t.Where(
-            gg.T__.In("describes").Values("name").
-            Is(gg.P.Within(ToInterfaceSlice(tags.Inner)...)).
-            Count().Is(gg.P.Eq(0)),
-        ),
-    }
+	return &Traversal{
+		t.Where(
+			gg.T__.In("describes").Values("name").
+				Is(gg.P.Within(ToInterfaceSlice(tags.Inner)...)).
+				Count().Is(gg.P.Eq(0)),
+		),
+	}
 }
 
 func (t *Traversal) removeTags(tags model.TagSet) error {
-    ce := t.InE("describes").Where(gg.T__.OutV().Values("name").Is(gg.P.Within(ToInterfaceSlice(tags.Inner)...))).Drop().Iterate()
-    return <- ce
+	ce := t.InE("describes").Where(gg.T__.OutV().Values("name").Is(gg.P.Within(ToInterfaceSlice(tags.Inner)...))).Drop().Iterate()
+	return <-ce
 }
 
 func (t *Traversal) addTags(tags model.TagSet) error {
-    ce := t.As("r").V().HasLabel("tag").
-    Where(gg.T__.Values("name").Is(gg.P.Within(ToInterfaceSlice(tags.Inner)...))).As("t").
-    MergeE(
-        map[interface{}]interface{}{
-            (gg.T.Label): "describes",
-            (gg.Direction.From):  gg.Merge.OutV,
-            (gg.Direction.To):    gg.Merge.InV,
-        }).
-    Option(gg.Merge.OutV, gg.T__.Select("t")).
-    Option(gg.Merge.InV, gg.T__.Select("r")).
-    Iterate()
-    return <- ce
+	ce := t.As("r").V().HasLabel("tag").
+		Where(gg.T__.Values("name").Is(gg.P.Within(ToInterfaceSlice(tags.Inner)...))).As("t").
+		MergeE(
+			map[interface{}]interface{}{
+				(gg.T.Label):        "describes",
+				(gg.Direction.From): gg.Merge.OutV,
+				(gg.Direction.To):   gg.Merge.InV,
+			}).
+		Option(gg.Merge.OutV, gg.T__.Select("t")).
+		Option(gg.Merge.InV, gg.T__.Select("r")).
+		Iterate()
+	return <-ce
 }
 
 func (t *Traversal) toResource() ([]model.Resource, error) {
 	rs, err := t.Project("r", "m", "u", "t").
-        By(gg.T__.Values("rsc_id")).
-        By(gg.T__.Values("mime")).
-        By(gg.T__.Values("upload")).
-        By(gg.T__.In("describes").Values("name").Fold()).
-        GetResultSet()
+		By(gg.T__.Values("rsc_id")).
+		By(gg.T__.Values("mime")).
+		By(gg.T__.Values("upload")).
+		By(gg.T__.In("describes").Values("name").Fold()).
+		GetResultSet()
 	var resources []model.Resource
 	if err != nil {
 		return nil, errors.New("result set failure")
@@ -201,65 +201,128 @@ func (t *Traversal) toResource() ([]model.Resource, error) {
 	return resources, nil
 }
 
+func (t *Traversal) toTags() (model.TagSet, error) {
+	rs, err := t.Values("name").GetResultSet()
+	var res model.TagSet
+	if err != nil {
+		return res, err
+	}
+
+	for r := range rs.Channel() {
+		s, ok := r.Data.([]interface{})
+		if !ok {
+			return res, errors.New("Data slice error")
+		}
+		ss, err := FromInterfaceSlice[string](s)
+		if err != nil {
+			return res, err
+		}
+		res.FromSlice(ss)
+	}
+
+	return res, nil
+}
+
 func (t *Traversal) part(offset, limit int) *Traversal {
-    return &Traversal{
-        t.Skip(offset).Limit(limit),
-    }
+	return &Traversal{
+		t.Skip(offset).Limit(limit),
+	}
 }
 
 type Gremlin struct {
-    ts *TraversalSource
-    fs backend.FileStore
+	ts     *TraversalSource
+	fs     backend.FileStore
 	remote *gg.DriverRemoteConnection
 }
 
 func (g *Gremlin) Connect(ctx context.Context) error {
-    return nil;
+	g.ts = &TraversalSource{gg.Traversal_().WithRemote(g.remote)}
+	g.fs.Connect(ctx)
+	return nil
 }
 
 func (g *Gremlin) AddResource(ctx context.Context, f io.Reader, tags model.TagSet) (string, error) {
-    return "", nil
+	var rsc model.Resource
+	id, err := backend.GenUUID()
+	if err != nil {
+		return "", err
+	}
+	rsc.Id = id
+	rsc.CreatedAt = time.Now().UTC()
+	rsc.Tags = tags
+	fi, fic, err := backend.IdentifyFile(f)
+	if err != nil {
+		return "", err
+	}
+	err = g.fs.AddFile(ctx, id, fi)
+	rid, ok := <- fic
+	if !ok {
+		return "", errors.New("Could not extract file information")
+	}
+	rsc.Mimetype = rid.Mime
+	g.ts.createResource(rsc)
+	if err != nil {
+		return "", nil
+	}
+	return "", nil
 }
 
 func (g *Gremlin) GetResource(ctx context.Context, id string) (model.Resource, error) {
-    rsc, err := g.ts.resources().withId(id).toResource()
-    if len(rsc) == 0 {
-        return model.Resource{}, backend.NoResult
-    }
-    return rsc[0], err
+	rsc, err := g.ts.resources().withId(id).toResource()
+	if len(rsc) == 0 {
+		return model.Resource{}, backend.NoResult
+	}
+	return rsc[0], err
 }
 
 func (g *Gremlin) TagQuery(ctx context.Context, query model.Query) ([]model.Resource, error) {
-    rsc, err := g.ts.resources().withTags(query.Include).withoutTags(query.Exclude).part(query.Offset, query.Limit).toResource()
-    return rsc, err
+	rsc, err := g.ts.resources().withTags(query.Include).withoutTags(query.Exclude).part(query.Offset, query.Limit).toResource()
+	return rsc, err
+}
+
+func (g *Gremlin) GetTags(ctx context.Context) (model.TagSet, error) {
+	ts, err := g.ts.tags().toTags()
+	if err != nil {
+		return model.TagSet{}, nil
+	}
+	return ts, nil
+}
+
+func (g *Gremlin) GetFile(ctx context.Context, id string) (io.ReadCloser, error) {
+	return g.fs.GetFile(ctx, id)
 }
 
 func (g *Gremlin) ChangeTags(ctx context.Context, addtags model.TagSet, deltags model.TagSet, id string) error {
-    tx, s, err := g.ts.tx()
-    if err != nil {
-        return err
-    }
-    defer tx.Rollback()
-    err = s.resources().withId(id).addTags(addtags)
-    if err != nil {
-        return err
-    }
-    err = s.resources().withId(id).removeTags(deltags)
-    if err != nil {
-        return err
-    }
-    err = tx.Commit()
-    if err != nil {
-        return err
-    }
-    return nil
+	tx, s, err := g.ts.tx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	err = s.resources().withId(id).addTags(addtags)
+	if err != nil {
+		return err
+	}
+	err = s.resources().withId(id).removeTags(deltags)
+	if err != nil {
+		return err
+	}
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (g *Gremlin) Close(ctx context.Context) error {
-    g.remote.Close()
-    return nil
+	g.fs.Close(ctx)
+	g.remote.Close()
+	return nil
 }
 
 func New(config Config, fs backend.FileStore) (*Gremlin, error) {
-    return &Gremlin{fs: fs}, nil
+	remote, err := gg.NewDriverRemoteConnection(config.Url)
+	if err != nil {
+		return nil, err
+	}
+	return &Gremlin{fs: fs, remote: remote}, nil
 }

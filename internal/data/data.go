@@ -12,10 +12,10 @@ import (
 type Database = backend.MetaStore
 
 type Config struct {
-	FileStoreType   string
-	MetaStoreType   string
-	FileStoreConfig json.RawMessage
-	MetaStoreConfig json.RawMessage
+	FileStoreType string
+	MetaStoreType string
+	FileStore     json.RawMessage
+	MetaStore     json.RawMessage
 }
 
 func Setup(config Config) (Database, error) {
@@ -25,7 +25,7 @@ func Setup(config Config) (Database, error) {
 	switch config.FileStoreType {
 	case "filesystem":
 		var conf filesystem.Config
-		err = json.Unmarshal(config.FileStoreConfig, &conf)
+		err = json.Unmarshal(config.FileStore, &conf)
 		if err != nil {
 			return nil, err
 		}
@@ -39,7 +39,7 @@ func Setup(config Config) (Database, error) {
 	switch config.MetaStoreType {
 	case "gremlin":
 		var conf gremlin.Config
-		err = json.Unmarshal(config.MetaStoreConfig, &conf)
+		err = json.Unmarshal(config.MetaStore, &conf)
 		if err != nil {
 			return nil, err
 		}
