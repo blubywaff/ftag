@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
