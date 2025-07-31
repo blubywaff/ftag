@@ -135,7 +135,7 @@ func resource(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(400)
 		return
 	}
-	rsrc, err := client.GetFile(req.Context(), idstr[0])
+	rsrc, err := client.GetResource(req.Context(), idstr[0])
 	// TODO id doesn't exist
 	if err != nil {
 		res.WriteHeader(500)
