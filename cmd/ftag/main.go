@@ -164,7 +164,7 @@ func resourceTags(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(500)
 		return
 	}
-	rsc, err := client.GetFile(req.Context(), tc.ResourceId)
+	rsc, err := client.GetResource(req.Context(), tc.ResourceId)
 	if err != nil {
 		res.WriteHeader(500)
 		return
