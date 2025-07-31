@@ -2,7 +2,7 @@
     "Database": {
         "MetaStoreType": "gremlin",
         "MetaStore": {
-            "Url": "bolt://localhost:7687"
+            "Url": "ws://localhost:8182"
         },
         "FileStoreType": "filesystem",
         "FileStore": {
