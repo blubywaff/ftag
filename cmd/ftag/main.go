@@ -58,7 +58,7 @@ func writeJson[T any](res http.ResponseWriter, value T) {
 
 func landingPage(res http.ResponseWriter, req *http.Request) {
 	res.WriteHeader(200)
-	res.Write([]byte("You have reached blubywaff.com at " + time.Now().UTC().Format("2006-01-02 15:04:05") + "."))
+	res.Write([]byte("You have reached ftag at " + time.Now().UTC().Format("2006-01-02 15:04:05") + "."))
 }
 
 func query(res http.ResponseWriter, req *http.Request) {
